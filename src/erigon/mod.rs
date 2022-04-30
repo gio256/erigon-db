@@ -10,7 +10,7 @@ use tables::*;
 pub mod models;
 pub mod tables;
 
-use models::{Account, BlockHeader, BodyForStorage, HeaderKey, Rlp};
+use models::{Account, BlockHeader, BlockNumber, BodyForStorage, HeaderKey, Incarnation, Rlp, StorageKey, Bytecode};
 
 /// Erigon wraps an MdbxTx and provides Erigon-specific access methods.
 pub struct Erigon<'env, K: TransactionKind>(pub MdbxTx<'env, K>);
@@ -36,7 +36,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the incarnation of the account when it was last deleted.
-    pub fn read_incarnation(&self, who: Address) -> Result<u64> {
+    pub fn read_incarnation(&self, who: Address) -> Result<Incarnation> {
         self.read::<IncarnationMap>(who)?.ok_or(eyre!("No value"))
     }
 
@@ -74,10 +74,55 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the header number assigned to a hash.
-    pub fn read_header_number(&self, hash: H256) -> Result<u64> {
+    pub fn read_header_number(&self, hash: H256) -> Result<BlockNumber> {
         self.read::<HeaderNumber>(hash)?.ok_or(eyre!("No value"))
     }
+
+    /// Returns the number of the current canonical block header
+    pub fn read_head_block_number(&mut self) -> Result<BlockNumber> {
+        let hash = self.read_head_header_hash()?;
+        self.read_header_number(hash)
+    }
+
+    /// Returns the signers of each transaction in the block.
+    pub fn read_senders(&mut self, key: HeaderKey) -> Result<Vec<Address>> {
+        self.read::<TxSender>(key)?.ok_or(eyre!("No value"))
+    }
+
+    /// Returns the hash assigned to a canonical block number.
+    pub fn read_canonical_hash(&mut self, num: BlockNumber) -> Result<H256> {
+        self.read::<CanonicalHeader>(num)?.ok_or(eyre!("No value"))
+    }
+
+    /// Determines whether a header with the given hash is on the canonical chain.
+    pub fn is_canonical_hash(&mut self, hash: H256) -> Result<bool> {
+        let num = self.read_header_number(hash)?;
+        let can_hash = self.read_canonical_hash(num)?;
+        Ok(can_hash != Default::default() && can_hash == hash)
+    }
+
+    /// Returns the value of the storage for account `who` indexed by `key`.
+    /// If the account or storage slot is not in the db, returns 0x0.
+    pub fn read_storage(&mut self, who: Address, inc: Incarnation, key: H256) -> Result<H256> {
+        let key = StorageKey::new(who, inc);
+        todo!()
+    }
+
+    /// Returns the code associated with the given codehash.
+    pub fn read_code(&mut self, codehash: H256) -> Result<Bytecode> {
+        if codehash == models::EMPTY_HASH {
+            return Ok(Default::default());
+        }
+        self.read::<Code>(codehash)?.ok_or(eyre!("No value"))
+    }
+
+    /// Returns the length of the code associated with the given codehash.
+    pub fn read_code_size(&mut self, codehash: H256) -> Result<usize> {
+        Ok(self.read_code(codehash)?.len())
+    }
+
 }
+
 impl<'env> Erigon<'env, mdbx::RW> {
     /// Opens and writes to the db table with the table's default flags
     pub fn write<'tx, T>(&'tx self, key: T::Key, val: T::Value) -> Result<()>
@@ -93,7 +138,7 @@ impl<'env> Erigon<'env, mdbx::RW> {
     pub fn write_head_block_hash(&self, v: H256) -> Result<()> {
         self.write::<LastBlock>(LastBlock, v)
     }
-    pub fn write_incarnation(&self, k: Address, v: u64) -> Result<()> {
+    pub fn write_incarnation(&self, k: Address, v: Incarnation) -> Result<()> {
         self.write::<IncarnationMap>(k, v)
     }
     pub fn write_account_data(&self, k: Address, v: Account) -> Result<()> {
@@ -102,7 +147,7 @@ impl<'env> Erigon<'env, mdbx::RW> {
     pub fn write_transaction_block_number(&self, k: H256, v: U256) -> Result<()> {
         self.write::<BlockTransactionLookup>(k, v)
     }
-    pub fn write_header_number(&self, k: H256, v: u64) -> Result<()> {
+    pub fn write_header_number(&self, k: H256, v: BlockNumber) -> Result<()> {
         self.write::<HeaderNumber>(k, v)
     }
     pub fn write_header(&self, k: HeaderKey, v: BlockHeader) -> Result<()> {

@@ -2,7 +2,11 @@ use bytes::{Buf, Bytes};
 use derive_more::{Deref, DerefMut};
 use ethereum_types::{Address, Bloom, H256, H64, U256};
 use eyre::{eyre, Result};
-use fastrlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use fastrlp::{
+    BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    RlpMaxEncodedLen,
+};
+// use fastrlp::*;
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
@@ -15,54 +19,103 @@ pub const KECCAK_LENGTH: usize = H256::len_bytes();
 pub const ADDRESS_LENGTH: usize = Address::len_bytes();
 pub const U64_LENGTH: usize = std::mem::size_of::<u64>();
 pub const BLOOM_BYTE_LENGTH: usize = 256;
+// Keccak-256 hash of an empty string, KEC("").
+pub const EMPTY_HASH: H256 = H256(hex_literal::hex!(
+    "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+));
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Deref,
-    DerefMut,
-    Serialize,
-    Deserialize,
-    Encode,
-    Decode,
-    RlpEncodable,
-    RlpDecodable,
-)]
-pub struct Rlp(pub Bytes);
-impl TableEncode for Rlp {
-    type Encoded = bytes::Bytes;
-    fn encode(self) -> Self::Encoded {
-        self.0
+macro_rules! bytes_wrapper {
+    ($t:ident) => {
+        #[derive(
+            Clone,
+            Debug,
+            PartialEq,
+            Eq,
+            Default,
+            Deref,
+            DerefMut,
+            Serialize,
+            Deserialize,
+            Encode,
+            Decode,
+            RlpEncodable,
+            RlpDecodable,
+        )]
+        pub struct $t(pub Bytes);
+        impl TableEncode for $t {
+            type Encoded = bytes::Bytes;
+            fn encode(self) -> Self::Encoded {
+                self.0
+            }
+        }
+
+        impl TableDecode for $t {
+            fn decode(b: &[u8]) -> Result<Self> {
+                TableDecode::decode(b).map(Self)
+            }
+        }
+    };
+}
+bytes_wrapper!(Rlp);
+bytes_wrapper!(Bytecode);
+
+// #[derive(
+//     Clone,
+//     Debug,
+//     PartialEq,
+//     Eq,
+//     Default,
+//     Deref,
+//     DerefMut,
+//     Serialize,
+//     Deserialize,
+//     Encode,
+//     Decode,
+//     RlpEncodable,
+//     RlpDecodable,
+// )]
+// pub struct Rlp(pub Bytes);
+// impl TableEncode for Rlp {
+//     type Encoded = bytes::Bytes;
+//     fn encode(self) -> Self::Encoded {
+//         self.0
+//     }
+// }
+
+// impl TableDecode for Rlp {
+//     fn decode(b: &[u8]) -> Result<Self> {
+//         TableDecode::decode(b).map(Self)
+//     }
+// }
+
+macro_rules! table_key {
+    ($name:ident($($t:ty),+)) => {
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            PartialEq,
+            Eq,
+            Default,
+            Serialize,
+            Deserialize,
+            Encode,
+            Decode,
+            RlpEncodable,
+            RlpDecodable,
+        )]
+        pub struct $name($(pub $t),+);
+
+        impl $name {
+            pub const SIZE: usize = 0 $(+ std::mem::size_of::<$t>())+;
+        }
     }
 }
 
-impl TableDecode for Rlp {
-    fn decode(b: &[u8]) -> Result<Self> {
-        <bytes::Bytes as TableDecode>::decode(b).map(Self)
-    }
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    Encode,
-    Decode,
-    RlpEncodable,
-    RlpDecodable,
-)]
-pub struct HeaderKey(pub u64, pub H256);
+table_key!(HeaderKey(BlockNumber, H256));
 
 impl TableEncode for HeaderKey {
-    type Encoded = VariableVec<{ U64_LENGTH + KECCAK_LENGTH }>;
+    type Encoded = VariableVec<{ Self::SIZE }>;
     fn encode(self) -> Self::Encoded {
         let mut out = Self::Encoded::default();
         out.try_extend_from_slice(&self.0.encode()).unwrap();
@@ -73,8 +126,8 @@ impl TableEncode for HeaderKey {
 
 impl TableDecode for HeaderKey {
     fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > U64_LENGTH + KECCAK_LENGTH {
-            return Err(TooLong::<{ U64_LENGTH + KECCAK_LENGTH }> { got: b.len() }.into());
+        if b.len() > Self::SIZE {
+            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
         }
         if b.len() < U64_LENGTH {
             return Err(TooShort::<{ U64_LENGTH }> { got: b.len() }.into());
@@ -84,10 +137,91 @@ impl TableDecode for HeaderKey {
     }
 }
 
+/// Key for the PlainContractCode table (address | incarnation)
+table_key!(PlainCodeKey(Address, Incarnation));
+
+impl TableEncode for PlainCodeKey {
+    type Encoded = VariableVec<{ Self::SIZE }>;
+    fn encode(self) -> Self::Encoded {
+        let mut out = Self::Encoded::default();
+        out.try_extend_from_slice(&self.0.encode()).unwrap();
+        out.try_extend_from_slice(&self.1.encode()).unwrap();
+        out
+    }
+}
+
+impl TableDecode for PlainCodeKey {
+    fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() > Self::SIZE {
+            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
+        }
+        if b.len() < ADDRESS_LENGTH {
+            return Err(TooShort::<{ ADDRESS_LENGTH }> { got: b.len() }.into());
+        }
+        let (fst, snd) = b.split_at(ADDRESS_LENGTH);
+        Ok(Self(TableDecode::decode(fst)?, TableDecode::decode(snd)?))
+    }
+}
+
+table_key!(ContractCodeKey(H256, Incarnation));
+
+impl ContractCodeKey {
+    fn new(who: Address, inc: Incarnation) -> Self {
+        Self(ethers::utils::keccak256(who).into(), inc)
+    }
+}
+
+impl TableEncode for ContractCodeKey {
+    type Encoded = VariableVec<{ Self::SIZE }>;
+    fn encode(self) -> Self::Encoded {
+        let mut out = Self::Encoded::default();
+        out.try_extend_from_slice(&self.0.encode()).unwrap();
+        out.try_extend_from_slice(&self.1.encode()).unwrap();
+        out
+    }
+}
+
+impl TableDecode for ContractCodeKey {
+    fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() > Self::SIZE {
+            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
+        }
+        if b.len() < KECCAK_LENGTH {
+            return Err(TooShort::<{ KECCAK_LENGTH }> { got: b.len() }.into());
+        }
+        let (fst, snd) = b.split_at(KECCAK_LENGTH);
+        Ok(Self(TableDecode::decode(fst)?, TableDecode::decode(snd)?))
+    }
+}
+
+/// Key for the HashedStorage table (keccak(address) | incarnation | keccak(storage_key))
+table_key!(HashStorageKey(H256, Incarnation, H256));
+
+impl TableEncode for HashStorageKey {
+    type Encoded = VariableVec<{ Self::SIZE }>;
+    fn encode(self) -> Self::Encoded {
+        let mut out = Self::Encoded::default();
+        out.try_extend_from_slice(&self.0.encode()).unwrap();
+        out.try_extend_from_slice(&self.1.encode()).unwrap();
+        out.try_extend_from_slice(&self.2.encode()).unwrap();
+        out
+    }
+}
+
+impl HashStorageKey {
+    pub fn new(who: Address, inc: Incarnation, key: H256) -> Self {
+        Self(
+            ethers::utils::keccak256(who).into(),
+            inc,
+            ethers::utils::keccak256(key).into(),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Account {
     pub nonce: u64,
-    pub incarnation: u64,
+    pub incarnation: Incarnation,
     pub balance: U256,
     pub codehash: H256, // hash of the bytecode
 }
@@ -116,7 +250,7 @@ impl TableDecode for Account {
 
         // has incarnation
         if fieldset & 4 > 0 {
-            acct.incarnation = parse_u64_with_len(&mut enc);
+            acct.incarnation = parse_u64_with_len(&mut enc).into();
         }
 
         // has codehash
@@ -132,12 +266,7 @@ impl TableDecode for Account {
             acct.codehash = H256::from_slice(&enc[..KECCAK_LENGTH]);
             enc.advance(KECCAK_LENGTH)
         }
-
-        // TODO: erigon docs mention storage hash field, code seems to disagree
-        if enc.remaining() > 0 {
-            eyre::bail!("unexpected account field")
-        }
-
+        // TODO: erigon docs mention additional storage hash field, code seems to disagree
         Ok(acct)
     }
 }
@@ -172,7 +301,7 @@ impl Account {
         self.nonce = nonce;
         self
     }
-    pub fn incarnation(mut self, inc: u64) -> Self {
+    pub fn incarnation(mut self, inc: Incarnation) -> Self {
         self.incarnation = inc;
         self
     }
@@ -189,10 +318,10 @@ impl Account {
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct StorageKey {
     pub address: Address,
-    pub incarnation: u64,
+    pub incarnation: Incarnation,
 }
 impl StorageKey {
-    pub fn new(address: Address, incarnation: u64) -> Self {
+    pub fn new(address: Address, incarnation: Incarnation) -> Self {
         Self {
             address,
             incarnation,
@@ -267,7 +396,6 @@ pub struct BlockHeader {
     pub base_fee: Option<U256>,
     pub seal: Option<Rlp>,
 }
-
 rlp_table_value!(BlockHeader);
 
 impl BlockHeader {
@@ -384,91 +512,226 @@ impl Decodable for BlockHeader {
     }
 }
 
-// macro_rules! impl_from {
-//     ($type:ty, $other:ty) => {
-//         impl From<$type> for $other {
-//             #[inline(always)]
-//             fn from(x: $type) -> $other {
-//                 x.0 as $other
-//             }
-//         }
-//     };
-// }
+// The TxSender table stores addresses with no serialization format (new address every 20 bytes)
+impl TableEncode for Vec<Address> {
+    type Encoded = Vec<u8>;
 
-// macro_rules! u64_wrapper {
-//     ($ty:ident) => {
-//         #[derive(
-//             Clone,
-//             Copy,
-//             Debug,
-//             Deref,
-//             DerefMut,
-//             Default,
-//             ::derive_more::Display,
-//             Eq,
-//             ::derive_more::From,
-//             ::derive_more::FromStr,
-//             PartialEq,
-//             PartialOrd,
-//             Ord,
-//             Hash,
-//             Serialize,
-//             Deserialize,
-//         )]
-//         #[serde(transparent)]
-//         #[repr(transparent)]
-//         pub struct $ty(pub u64);
+    fn encode(self) -> Self::Encoded {
+        let mut v = Vec::with_capacity(self.len() * ADDRESS_LENGTH);
+        for addr in self {
+            v.extend_from_slice(&addr.encode());
+        }
 
-//         impl ::parity_scale_codec::WrapperTypeEncode for $ty {}
-//         impl ::parity_scale_codec::EncodeLike for $ty {}
-//         impl ::parity_scale_codec::EncodeLike<u64> for $ty {}
-//         impl ::parity_scale_codec::EncodeLike<$ty> for u64 {}
-//         impl ::parity_scale_codec::WrapperTypeDecode for $ty {
-//             type Wrapped = u64;
-//         }
-//         impl From<::parity_scale_codec::Compact<$ty>> for $ty {
-//             #[inline(always)]
-//             fn from(x: ::parity_scale_codec::Compact<$ty>) -> $ty {
-//                 x.0
-//             }
-//         }
-//         impl ::parity_scale_codec::CompactAs for $ty {
-//             type As = u64;
-//             #[inline(always)]
-//             fn encode_as(&self) -> &Self::As {
-//                 &self.0
-//             }
-//             #[inline(always)]
-//             fn decode_from(v: Self::As) -> Result<Self, ::parity_scale_codec::Error> {
-//                 Ok(Self(v))
-//             }
-//         }
-//         impl PartialOrd<usize> for $ty {
-//             #[inline(always)]
-//             fn partial_cmp(&self, other: &usize) -> Option<std::cmp::Ordering> {
-//                 self.0.partial_cmp(&(*other as u64))
-//             }
-//         }
-//         impl PartialEq<usize> for $ty {
-//             #[inline(always)]
-//             fn eq(&self, other: &usize) -> bool {
-//                 self.0 == *other as u64
-//             }
-//         }
-//         impl std::ops::Add<i32> for $ty {
-//             type Output = Self;
-//             #[inline(always)]
-//             fn add(self, other: i32) -> Self {
-//                 Self(self.0 + u64::try_from(other).unwrap())
-//             }
-//         }
+        v
+    }
+}
 
-//         impl_from!($ty, u64);
-//         impl_from!($ty, usize);
-//     };
-// }
+impl TableDecode for Vec<Address> {
+    fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() % ADDRESS_LENGTH != 0 {
+            eyre::bail!("Slice len should be divisible by {}", ADDRESS_LENGTH);
+        }
 
-// u64_wrapper!(BlockNumber);
-// u64_wrapper!(ChainId);
-// u64_wrapper!(NetworkId);
-// u64_wrapper!(TxIndex);
+        let mut v = Vec::with_capacity(b.len() / ADDRESS_LENGTH);
+        for i in 0..b.len() / ADDRESS_LENGTH {
+            let offset = i * ADDRESS_LENGTH;
+            v.push(TableDecode::decode(&b[offset..offset + ADDRESS_LENGTH])?);
+        }
+
+        Ok(v)
+    }
+}
+
+// -- macros from Akula, largely unaltered
+
+macro_rules! impl_ops {
+    ($type:ty, $other:ty) => {
+        impl std::ops::Add<$other> for $type {
+            type Output = Self;
+            #[inline(always)]
+            fn add(self, other: $other) -> Self {
+                Self(
+                    self.0
+                        + u64::try_from(other)
+                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
+                )
+            }
+        }
+        impl std::ops::Sub<$other> for $type {
+            type Output = Self;
+            #[inline(always)]
+            fn sub(self, other: $other) -> Self {
+                Self(
+                    self.0
+                        - u64::try_from(other)
+                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
+                )
+            }
+        }
+        impl std::ops::Mul<$other> for $type {
+            type Output = Self;
+            #[inline(always)]
+            fn mul(self, other: $other) -> Self {
+                Self(
+                    self.0
+                        * u64::try_from(other)
+                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
+                )
+            }
+        }
+        impl std::ops::Div<$other> for $type {
+            type Output = Self;
+            #[inline(always)]
+            fn div(self, other: $other) -> Self {
+                Self(
+                    self.0
+                        / u64::try_from(other)
+                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
+                )
+            }
+        }
+        impl std::ops::Rem<$other> for $type {
+            type Output = Self;
+            #[inline(always)]
+            fn rem(self, other: $other) -> Self {
+                Self(
+                    self.0
+                        % u64::try_from(other)
+                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
+                )
+            }
+        }
+        impl std::ops::AddAssign<$other> for $type {
+            #[inline(always)]
+            fn add_assign(&mut self, other: $other) {
+                self.0 += u64::try_from(other)
+                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
+            }
+        }
+        impl std::ops::SubAssign<$other> for $type {
+            #[inline(always)]
+            fn sub_assign(&mut self, other: $other) {
+                self.0 -= u64::try_from(other)
+                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
+            }
+        }
+        impl std::ops::MulAssign<$other> for $type {
+            #[inline(always)]
+            fn mul_assign(&mut self, other: $other) {
+                self.0 *= u64::try_from(other)
+                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
+            }
+        }
+        impl std::ops::DivAssign<$other> for $type {
+            #[inline(always)]
+            fn div_assign(&mut self, other: $other) {
+                self.0 /= u64::try_from(other)
+                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
+            }
+        }
+        impl std::ops::RemAssign<$other> for $type {
+            #[inline(always)]
+            fn rem_assign(&mut self, other: $other) {
+                self.0 %= u64::try_from(other)
+                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
+            }
+        }
+    };
+}
+
+macro_rules! impl_from {
+    ($type:ty, $other:ty) => {
+        impl From<$type> for $other {
+            #[inline(always)]
+            fn from(x: $type) -> $other {
+                x.0 as $other
+            }
+        }
+    };
+}
+
+macro_rules! u64_wrapper {
+    ($ty:ident) => {
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            derive_more::Deref,
+            derive_more::DerefMut,
+            Default,
+            derive_more::Display,
+            Eq,
+            derive_more::From,
+            derive_more::FromStr,
+            PartialEq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Serialize,
+            Deserialize,
+            RlpEncodable,
+            RlpDecodableWrapper,
+            RlpMaxEncodedLen,
+        )]
+        #[serde(transparent)]
+        #[repr(transparent)]
+        pub struct $ty(pub u64);
+
+        impl ::parity_scale_codec::WrapperTypeEncode for $ty {}
+        impl ::parity_scale_codec::EncodeLike for $ty {}
+        impl ::parity_scale_codec::EncodeLike<u64> for $ty {}
+        impl ::parity_scale_codec::EncodeLike<$ty> for u64 {}
+        impl ::parity_scale_codec::WrapperTypeDecode for $ty {
+            type Wrapped = u64;
+        }
+        impl From<::parity_scale_codec::Compact<$ty>> for $ty {
+            #[inline(always)]
+            fn from(x: ::parity_scale_codec::Compact<$ty>) -> $ty {
+                x.0
+            }
+        }
+        impl ::parity_scale_codec::CompactAs for $ty {
+            type As = u64;
+            #[inline(always)]
+            fn encode_as(&self) -> &Self::As {
+                &self.0
+            }
+            #[inline(always)]
+            fn decode_from(v: Self::As) -> Result<Self, ::parity_scale_codec::Error> {
+                Ok(Self(v))
+            }
+        }
+        impl PartialOrd<usize> for $ty {
+            #[inline(always)]
+            fn partial_cmp(&self, other: &usize) -> Option<std::cmp::Ordering> {
+                self.0.partial_cmp(&(*other as u64))
+            }
+        }
+        impl PartialEq<usize> for $ty {
+            #[inline(always)]
+            fn eq(&self, other: &usize) -> bool {
+                self.0 == *other as u64
+            }
+        }
+        impl std::ops::Add<i32> for $ty {
+            type Output = Self;
+            #[inline(always)]
+            fn add(self, other: i32) -> Self {
+                Self(self.0 + u64::try_from(other).unwrap())
+            }
+        }
+
+        impl_from!($ty, u64);
+        impl_from!($ty, usize);
+
+        impl_ops!($ty, u8);
+        impl_ops!($ty, u64);
+        impl_ops!($ty, usize);
+        impl_ops!($ty, $ty);
+    };
+}
+
+u64_wrapper!(BlockNumber);
+u64_wrapper!(Incarnation);
+crate::u64_table_object!(BlockNumber);
+crate::u64_table_object!(Incarnation);

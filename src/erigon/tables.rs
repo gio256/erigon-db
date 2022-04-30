@@ -1,7 +1,8 @@
 use crate::{
-    decl_table,
-    erigon::models::{Account, BlockHeader, BodyForStorage, HeaderKey, Rlp, StorageKey},
+    dupsort_table,
+    erigon::models::*,
     kv::{tables::TableHandle, traits::*, EnvFlags},
+    table,
 };
 use ethereum_types::{Address, H256, U256};
 use mdbx::DatabaseFlags;
@@ -28,21 +29,34 @@ encode_const!(LastHeader);
 // every query of the LastBlock table takes the same key, "LastBlock"
 encode_const!(LastBlock);
 
-decl_table!(LastHeader              => LastHeader       => H256);
-decl_table!(LastBlock               => LastBlock        => H256);
-decl_table!(IncarnationMap          => Address          => u64);
-decl_table!(BlockTransactionLookup  => H256             => U256);
-decl_table!(PlainState              => Address          => Account);
-decl_table!(HeaderNumber            => H256             => u64);
-decl_table!(Header                  => HeaderKey        => BlockHeader);
+table!(LastHeader               => LastHeader   => H256);
+table!(LastBlock                => LastBlock    => H256);
+table!(IncarnationMap           => Address      => Incarnation);
+table!(BlockTransactionLookup   => H256         => U256);
+//TODO: PlainState dup sorts in reverse?
+table!(PlainState               => Address      => Account);
+table!(HeaderNumber             => H256         => BlockNumber);
+table!(Header                   => HeaderKey    => BlockHeader, SeekKey = BlockNumber);
+table!(BlockBody                => HeaderKey    => BodyForStorage, SeekKey = BlockNumber);
+table!(PlainCodeHash            => PlainCodeKey => H256);
+table!(TxSender                 => HeaderKey    => Vec<Address>);
+// block number => header hash
+table!(CanonicalHeader          => BlockNumber  => H256);
 
-decl_table!(BlockBody               => HeaderKey        => BodyForStorage);
+// keccak(address) => Account
+table!(HashedAccount => H256 => Account);
+// keccak(address) | incarnation | keccak(storage_key) => storage value
+table!(HashedStorage => HashStorageKey => H256);
+// table!(AccountsHistory);
+// table!(StorageHistory);
+table!(Code => H256 => Bytecode);
+// keccak256(address) | incarnation => code hash
+table!(ContractCode => ContractCodeKey => H256);
 
-decl_table!(PlainContractCode       => (Address, u64)   => H256);
-// decl_table!(BlockBody               => HeaderKey        => models::BodyForStorage, SeekKey = u64);
-
-// type HeaderKey = (H256, U256);
-// crate::decl_table!(PlainState => models::StorageKey  => HeaderKey, SeekKey = H256);
+// block number => address | encoded account
+// dupsort_table!(AccountChangeSet => u64 => (Address, Account), SeekBothKey = Address);
+// block number | address | incarnation => plain_storage_key | value
+dupsort_table!(StorageChangeSet => (u64, StorageKey) => (H256, H256), SeekBothKey = H256);
 
 // Manually implement storage table because it overlaps with PlainState
 #[derive(Debug, Default, Clone, Copy)]
@@ -56,16 +70,14 @@ impl<'tx> crate::kv::traits::Table<'tx> for Storage {
 impl DbName for Storage {
     const NAME: &'static str = "PlainState";
 }
-impl Storage {
-    pub const fn flags() -> u32 {
-        DatabaseFlags::DUP_SORT.bits()
-    }
+impl crate::kv::traits::DupSort<'_> for Storage {
+    type SeekBothKey = H256;
+}
+impl crate::kv::traits::DefaultFlags for Storage {
+    type Flags = crate::kv::tables::DupSortFlags;
 }
 impl std::fmt::Display for Storage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Storage")
+        write!(f, "Storage (PlainState)")
     }
-}
-impl crate::kv::traits::DupSort<'_> for Storage {
-    type SeekBothKey = H256;
 }

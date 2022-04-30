@@ -7,7 +7,7 @@ pub mod kv;
 mod tests {
     use super::*;
     use crate::{
-        erigon::{models::HeaderKey, Erigon},
+        erigon::{models::*, Erigon},
         kv::{EnvFlags, MdbxEnv},
     };
     use ethereum_types::*;
@@ -49,6 +49,14 @@ mod tests {
         // let mut buf = vec![];
         // header.encode(&mut buf);
         // assert_eq!(erigon::models::Rlp(buf.into()), rlp);
+        // let foo = dbg!(PlainPrefix::SIZE);
+        // let who: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2".parse()?;
+        // let pre = PlainPrefix(who, u64::MAX);
+        // dbg!(pre.clone());
+        // let enc = kv::traits::TableEncode::encode(pre.clone());
+        // dbg!(enc.clone());
+        // let dec: PlainPrefix = kv::traits::TableDecode::decode(&enc)?;
+        // dbg!(dec);
         Ok(())
     }
 }

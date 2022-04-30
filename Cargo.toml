@@ -14,6 +14,7 @@ derive_more = "0.99"
 eyre = "0.6.5"
 ethers = { git = "https://github.com/gakonst/ethers-rs" }
 ethereum-types = { version = "0.13", features = ["codec"] }
+hex-literal = "0.3"
 mdbx = { package = "libmdbx", version = "0.1" }
 parity-scale-codec = { version = "3", features = ["bytes"] }
 fastrlp = { version = "0.1", features = [

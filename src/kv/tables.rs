@@ -52,7 +52,7 @@ impl DbFlags for DupSortFlags {
     const FLAGS: DatabaseFlags = DatabaseFlags::DUP_SORT;
 }
 #[macro_export]
-macro_rules! decl_table_without_flags {
+macro_rules! table_without_flags {
     ($name:ident => $key:ty => $value:ty, SeekKey = $seek_key:ty) => {
         #[derive(Debug, Default, Clone, Copy)]
         pub struct $name;
@@ -75,23 +75,23 @@ macro_rules! decl_table_without_flags {
         }
     };
     ($name:ident => $key:ty => $value:ty) => {
-        $crate::decl_table_without_flags!($name => $key => $value, SeekKey = $key);
+        $crate::table_without_flags!($name => $key => $value, SeekKey = $key);
     };
 }
 
 #[macro_export]
-macro_rules! decl_table {
+macro_rules! table {
     ($name:ident => $($args:tt)*) => {
-        $crate::decl_table_without_flags!($name => $($args)*);
+        $crate::table_without_flags!($name => $($args)*);
         impl $crate::kv::traits::DefaultFlags for $name {
             type Flags = $crate::kv::tables::NoFlags;
         }
     };
 }
 #[macro_export]
-macro_rules! decl_dupsort_table {
-    ($name:ident => $($args:tt)*; SeekBothKey = $seek_both:ty) => {
-        $crate::decl_table_without_flags!($name => $($args)*);
+macro_rules! dupsort_table {
+    ($name:ident => $key:ty => $value:ty, SeekBothKey = $seek_both:ty) => {
+        $crate::table_without_flags!($name => $key => $value);
         impl $crate::kv::traits::DefaultFlags for $name {
             type Flags = $crate::kv::tables::DupSortFlags;
         }
@@ -269,30 +269,6 @@ impl TableDecode for Address {
     }
 }
 
-#[macro_export]
-macro_rules! u64_table_object {
-    ($ty:ident) => {
-        impl $crate::kv::traits::TableEncode for $ty {
-            type Encoded = [u8; 8];
-
-            fn encode(self) -> Self::Encoded {
-                self.to_be_bytes()
-            }
-        }
-
-        impl $crate::kv::traits::TableDecode for $ty {
-            fn decode(b: &[u8]) -> Result<Self> {
-                match b.len() {
-                    8 => Ok(u64::from_be_bytes(*::arrayref::array_ref!(&*b, 0, 8)).into()),
-                    other => Err($crate::kv::tables::InvalidLength::<8> { got: other }.into()),
-                }
-            }
-        }
-    };
-}
-
-u64_table_object!(u64);
-
 impl TableEncode for (H256, U256) {
     type Encoded = VariableVec<{ KECCAK_LENGTH + KECCAK_LENGTH }>;
 
@@ -364,3 +340,27 @@ impl TableDecode for bytes::Bytes {
         Ok(b.to_vec().into())
     }
 }
+
+#[macro_export]
+macro_rules! u64_table_object {
+    ($ty:ident) => {
+        impl $crate::kv::traits::TableEncode for $ty {
+            type Encoded = [u8; 8];
+
+            fn encode(self) -> Self::Encoded {
+                self.to_be_bytes()
+            }
+        }
+
+        impl $crate::kv::traits::TableDecode for $ty {
+            fn decode(b: &[u8]) -> Result<Self> {
+                match b.len() {
+                    8 => Ok(u64::from_be_bytes(*::arrayref::array_ref!(&*b, 0, 8)).into()),
+                    other => Err($crate::kv::tables::InvalidLength::<8> { got: other }.into()),
+                }
+            }
+        }
+    };
+}
+
+u64_table_object!(u64);
