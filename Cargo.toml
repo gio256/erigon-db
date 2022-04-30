@@ -27,3 +27,4 @@ serde_json = "1"
 
 [patch.crates-io]
 libmdbx = { git = "https://github.com/gio256/libmdbx-rs", branch = "develop" }
+fastrlp = { path = "../ext/fastrlp" }

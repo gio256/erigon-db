@@ -2,15 +2,48 @@ use bytes::{Buf, Bytes};
 use derive_more::{Deref, DerefMut};
 use ethereum_types::{Address, Bloom, H256, H64, U256};
 use eyre::{eyre, Result};
-use fastrlp::*;
+use fastrlp::{Encodable, Decodable, DecodeError, BufMut, RlpEncodable, RlpDecodable};
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::kv::traits::{TableDecode, TableEncode};
+use crate::kv::{
+    tables::{TooLong, TooShort, VariableVec},
+    traits::{TableDecode, TableEncode},
+};
 
-const KECCAK_LENGTH: usize = H256::len_bytes();
-const ADDRESS_LENGTH: usize = Address::len_bytes();
-const U64_LENGTH: usize = std::mem::size_of::<u64>();
+pub const KECCAK_LENGTH: usize = H256::len_bytes();
+pub const ADDRESS_LENGTH: usize = Address::len_bytes();
+pub const U64_LENGTH: usize = std::mem::size_of::<u64>();
+pub const BLOOM_BYTE_LENGTH: usize = 256;
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    Deref,
+    DerefMut,
+    Serialize,
+    Deserialize,
+    Encode,
+    Decode,
+    RlpEncodable,
+    RlpDecodable,
+)]
+pub struct Rlp(pub Bytes);
+impl TableEncode for Rlp {
+    type Encoded = bytes::Bytes;
+    fn encode(self) -> Self::Encoded {
+        self.0
+    }
+}
+
+impl TableDecode for Rlp {
+    fn decode(b: &[u8]) -> Result<Self> {
+        <bytes::Bytes as TableDecode>::decode(b).map(Self)
+    }
+}
 
 #[derive(
     Clone,
@@ -25,7 +58,33 @@ const U64_LENGTH: usize = std::mem::size_of::<u64>();
     RlpEncodable,
     RlpDecodable,
 )]
-pub struct Rlp(Bytes);
+pub struct HeaderKey(pub u64, pub H256);
+
+impl TableEncode for HeaderKey {
+    type Encoded = VariableVec<{ U64_LENGTH + KECCAK_LENGTH }>;
+    fn encode(self) -> Self::Encoded {
+        let mut out = Self::Encoded::default();
+        out.try_extend_from_slice(&self.0.encode()).unwrap();
+        out.try_extend_from_slice(&self.1.encode()).unwrap();
+        out
+    }
+}
+
+impl TableDecode for HeaderKey {
+    fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() > U64_LENGTH + KECCAK_LENGTH {
+            return Err(TooLong::<{ U64_LENGTH + KECCAK_LENGTH }> { got: b.len() }.into());
+        }
+        if b.len() < U64_LENGTH {
+            return Err(TooShort::<{ U64_LENGTH }> { got: b.len() }.into());
+        }
+        let (num, hash) = b.split_at(U64_LENGTH);
+        Ok(Self(
+            TableDecode::decode(num)?,
+            TableDecode::decode(hash)?,
+        ))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Account {
@@ -166,14 +225,39 @@ impl TableDecode for StorageKey {
 pub struct BodyForStorage {
     pub base_tx_id: u64,
     pub tx_amount: u32,
-    // pub uncles: Vec<BlockHeader>,
+    pub uncles: Vec<BlockHeader>,
 }
+
+impl TableEncode for BlockHeader {
+    type Encoded = bytes::Bytes;
+    fn encode(self) -> Self::Encoded {
+        let mut buf = bytes::BytesMut::new();
+        Encodable::encode(&self, &mut buf);
+        buf.into()
+    }
+}
+impl TableDecode for BlockHeader {
+    fn decode(mut b: &[u8]) -> Result<Self> {
+        Decodable::decode(&mut b).map_err(From::from)
+    }
+}
+
 // #[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut)]
 // struct BlockNumber(u64);
-crate::u64_table_object!(BlockNumber);
+// crate::u64_table_object!(BlockNumber);
 // u64_table_object!(TxIndex);
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Encode, Decode)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    Encode,
+    Decode,
+)]
 pub struct BlockHeader {
     pub parent_hash: H256,
     pub uncle_hash: H256,
@@ -190,97 +274,209 @@ pub struct BlockHeader {
     pub extra: Bytes,
     pub mix_digest: H256,
     pub nonce: H64,
-    pub base_fee: U256,
-    pub eip1559: bool,
-    pub seal: Rlp,
-    pub with_seal: bool,
+    pub base_fee: Option<U256>,
+    pub seal: Option<Rlp>,
 }
 
-macro_rules! impl_from {
-    ($type:ty, $other:ty) => {
-        impl From<$type> for $other {
-            #[inline(always)]
-            fn from(x: $type) -> $other {
-                x.0 as $other
-            }
+impl BlockHeader {
+    fn rlp_header(&self) -> fastrlp::Header {
+        let mut rlp_head = fastrlp::Header {
+            list: true,
+            payload_length: 0,
+        };
+
+        rlp_head.payload_length += KECCAK_LENGTH + 1; // parent_hash
+        rlp_head.payload_length += KECCAK_LENGTH + 1; // ommers_hash
+        rlp_head.payload_length += ADDRESS_LENGTH + 1; // beneficiary
+        rlp_head.payload_length += KECCAK_LENGTH + 1; // state_root
+        rlp_head.payload_length += KECCAK_LENGTH + 1; // transactions_root
+        rlp_head.payload_length += KECCAK_LENGTH + 1; // receipts_root
+        rlp_head.payload_length += BLOOM_BYTE_LENGTH + fastrlp::length_of_length(BLOOM_BYTE_LENGTH); // logs_bloom
+        rlp_head.payload_length += self.difficulty.length(); // difficulty
+        rlp_head.payload_length += self.number.length(); // block height
+        rlp_head.payload_length += self.gas_limit.length(); // gas_limit
+        rlp_head.payload_length += self.gas_used.length(); // gas_used
+        rlp_head.payload_length += self.time.length(); // timestamp
+        rlp_head.payload_length += self.extra.length(); // extra_data
+
+        rlp_head.payload_length += KECCAK_LENGTH + 1; // mix_hash
+        rlp_head.payload_length += 8 + 1; // nonce
+
+        if let Some(base_fee) = self.base_fee {
+            rlp_head.payload_length += base_fee.length();
         }
-    };
+
+        rlp_head
+    }
 }
 
-macro_rules! u64_wrapper {
-    ($ty:ident) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            Deref,
-            DerefMut,
-            Default,
-            ::derive_more::Display,
-            Eq,
-            ::derive_more::From,
-            ::derive_more::FromStr,
-            PartialEq,
-            PartialOrd,
-            Ord,
-            Hash,
-            Serialize,
-            Deserialize,
-        )]
-        #[serde(transparent)]
-        #[repr(transparent)]
-        pub struct $ty(pub u64);
-
-        impl ::parity_scale_codec::WrapperTypeEncode for $ty {}
-        impl ::parity_scale_codec::EncodeLike for $ty {}
-        impl ::parity_scale_codec::EncodeLike<u64> for $ty {}
-        impl ::parity_scale_codec::EncodeLike<$ty> for u64 {}
-        impl ::parity_scale_codec::WrapperTypeDecode for $ty {
-            type Wrapped = u64;
+impl Encodable for BlockHeader {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.rlp_header().encode(out);
+        Encodable::encode(&self.parent_hash, out);
+        Encodable::encode(&self.uncle_hash, out);
+        Encodable::encode(&self.coinbase, out);
+        Encodable::encode(&self.root, out);
+        Encodable::encode(&self.tx_hash, out);
+        Encodable::encode(&self.receipts_hash, out);
+        Encodable::encode(&self.bloom, out);
+        Encodable::encode(&self.difficulty, out);
+        Encodable::encode(&self.number, out);
+        Encodable::encode(&self.gas_limit, out);
+        Encodable::encode(&self.gas_used, out);
+        Encodable::encode(&self.time, out);
+        Encodable::encode(&self.extra, out);
+        Encodable::encode(&self.mix_digest, out);
+        Encodable::encode(&self.nonce, out);
+        if let Some(base_fee) = self.base_fee {
+            Encodable::encode(&base_fee, out);
         }
-        impl From<::parity_scale_codec::Compact<$ty>> for $ty {
-            #[inline(always)]
-            fn from(x: ::parity_scale_codec::Compact<$ty>) -> $ty {
-                x.0
-            }
-        }
-        impl ::parity_scale_codec::CompactAs for $ty {
-            type As = u64;
-            #[inline(always)]
-            fn encode_as(&self) -> &Self::As {
-                &self.0
-            }
-            #[inline(always)]
-            fn decode_from(v: Self::As) -> Result<Self, ::parity_scale_codec::Error> {
-                Ok(Self(v))
-            }
-        }
-        impl PartialOrd<usize> for $ty {
-            #[inline(always)]
-            fn partial_cmp(&self, other: &usize) -> Option<std::cmp::Ordering> {
-                self.0.partial_cmp(&(*other as u64))
-            }
-        }
-        impl PartialEq<usize> for $ty {
-            #[inline(always)]
-            fn eq(&self, other: &usize) -> bool {
-                self.0 == *other as u64
-            }
-        }
-        impl std::ops::Add<i32> for $ty {
-            type Output = Self;
-            #[inline(always)]
-            fn add(self, other: i32) -> Self {
-                Self(self.0 + u64::try_from(other).unwrap())
-            }
-        }
-
-        impl_from!($ty, u64);
-        impl_from!($ty, usize);
-    };
+    }
+    fn length(&self) -> usize {
+        let rlp_head = self.rlp_header();
+        fastrlp::length_of_length(rlp_head.payload_length) + rlp_head.payload_length
+    }
 }
 
-u64_wrapper!(BlockNumber);
+// https://github.com/ledgerwatch/erigon/blob/156da607e7495d709c141aec40f66a2556d35dc0/core/types/block.go#L430
+impl Decodable for BlockHeader {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let rlp_head = fastrlp::Header::decode(buf)?;
+        if !rlp_head.list {
+            return Err(DecodeError::UnexpectedString);
+        }
+        let rest = buf.len() - rlp_head.payload_length;
+        let parent_hash = Decodable::decode(buf)?;
+        let uncle_hash = Decodable::decode(buf)?;
+        let coinbase = Decodable::decode(buf)?;
+        let root = Decodable::decode(buf)?;
+        let tx_hash = Decodable::decode(buf)?;
+        let receipts_hash = Decodable::decode(buf)?;
+        let bloom = Decodable::decode(buf)?;
+        let difficulty = Decodable::decode(buf)?;
+        let number = Decodable::decode(buf)?;
+        let gas_limit = Decodable::decode(buf)?;
+        let gas_used = Decodable::decode(buf)?;
+        let time = Decodable::decode(buf)?;
+        let extra = Decodable::decode(buf)?;
+
+        // TODO: seal fields
+        let seal = None;
+        let mix_digest = Decodable::decode(buf)?;
+        let nonce = Decodable::decode(buf)?;
+        let base_fee = if buf.len() > rest {
+            Some(Decodable::decode(buf)?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            parent_hash,
+            uncle_hash,
+            coinbase,
+            root,
+            tx_hash,
+            receipts_hash,
+            bloom,
+            difficulty,
+            number,
+            gas_limit,
+            gas_used,
+            time,
+            extra,
+            mix_digest,
+            nonce,
+            base_fee,
+            seal,
+        })
+    }
+}
+
+// macro_rules! impl_from {
+//     ($type:ty, $other:ty) => {
+//         impl From<$type> for $other {
+//             #[inline(always)]
+//             fn from(x: $type) -> $other {
+//                 x.0 as $other
+//             }
+//         }
+//     };
+// }
+
+// macro_rules! u64_wrapper {
+//     ($ty:ident) => {
+//         #[derive(
+//             Clone,
+//             Copy,
+//             Debug,
+//             Deref,
+//             DerefMut,
+//             Default,
+//             ::derive_more::Display,
+//             Eq,
+//             ::derive_more::From,
+//             ::derive_more::FromStr,
+//             PartialEq,
+//             PartialOrd,
+//             Ord,
+//             Hash,
+//             Serialize,
+//             Deserialize,
+//         )]
+//         #[serde(transparent)]
+//         #[repr(transparent)]
+//         pub struct $ty(pub u64);
+
+//         impl ::parity_scale_codec::WrapperTypeEncode for $ty {}
+//         impl ::parity_scale_codec::EncodeLike for $ty {}
+//         impl ::parity_scale_codec::EncodeLike<u64> for $ty {}
+//         impl ::parity_scale_codec::EncodeLike<$ty> for u64 {}
+//         impl ::parity_scale_codec::WrapperTypeDecode for $ty {
+//             type Wrapped = u64;
+//         }
+//         impl From<::parity_scale_codec::Compact<$ty>> for $ty {
+//             #[inline(always)]
+//             fn from(x: ::parity_scale_codec::Compact<$ty>) -> $ty {
+//                 x.0
+//             }
+//         }
+//         impl ::parity_scale_codec::CompactAs for $ty {
+//             type As = u64;
+//             #[inline(always)]
+//             fn encode_as(&self) -> &Self::As {
+//                 &self.0
+//             }
+//             #[inline(always)]
+//             fn decode_from(v: Self::As) -> Result<Self, ::parity_scale_codec::Error> {
+//                 Ok(Self(v))
+//             }
+//         }
+//         impl PartialOrd<usize> for $ty {
+//             #[inline(always)]
+//             fn partial_cmp(&self, other: &usize) -> Option<std::cmp::Ordering> {
+//                 self.0.partial_cmp(&(*other as u64))
+//             }
+//         }
+//         impl PartialEq<usize> for $ty {
+//             #[inline(always)]
+//             fn eq(&self, other: &usize) -> bool {
+//                 self.0 == *other as u64
+//             }
+//         }
+//         impl std::ops::Add<i32> for $ty {
+//             type Output = Self;
+//             #[inline(always)]
+//             fn add(self, other: i32) -> Self {
+//                 Self(self.0 + u64::try_from(other).unwrap())
+//             }
+//         }
+
+//         impl_from!($ty, u64);
+//         impl_from!($ty, usize);
+//     };
+// }
+
+// u64_wrapper!(BlockNumber);
 // u64_wrapper!(ChainId);
 // u64_wrapper!(NetworkId);
-u64_wrapper!(TxIndex);
+// u64_wrapper!(TxIndex);

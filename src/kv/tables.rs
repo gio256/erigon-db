@@ -231,23 +231,24 @@ impl TableDecode for H256 {
 impl TableEncode for U256 {
     type Encoded = VariableVec<KECCAK_LENGTH>;
     fn encode(self) -> Self::Encoded {
-        todo!() //TODO
-                // self.to_be_bytes()
-                //     .into_iter()
-                //     .skip_while(|&v| v == 0)
-                //     .collect()
+        // self.to_be_bytes()
+        //     .into_iter()
+        //     .skip_while(|&v| v == 0)
+        //     .collect()
+        let mut buf = [0; 32];
+        self.to_big_endian(&mut buf);
+        buf.into_iter().skip_while(|&v| v == 0).collect()
     }
 }
 
 impl TableDecode for U256 {
     fn decode(b: &[u8]) -> Result<Self> {
-        todo!() //TODO
-                // if b.len() > KECCAK_LENGTH {
-                //     return Err(TooLong::<KECCAK_LENGTH> { got: b.len() }.into());
-                // }
-                // let mut v = [0; 32];
-                // v[KECCAK_LENGTH - b.len()..].copy_from_slice(b);
-                // Ok(Self::from_be_bytes(v))
+        if b.len() > KECCAK_LENGTH {
+            return Err(TooLong::<KECCAK_LENGTH> { got: b.len() }.into());
+        }
+        let mut v = [0; 32];
+        v[KECCAK_LENGTH - b.len()..].copy_from_slice(b);
+        Ok(Self::from_big_endian(&v))
     }
 }
 
@@ -347,5 +348,20 @@ where
             A::decode(&v[..A_LEN]).unwrap(),
             B::decode(&v[A_LEN..]).unwrap(),
         ))
+    }
+}
+
+
+impl TableEncode for bytes::Bytes {
+    type Encoded = Self;
+
+    fn encode(self) -> Self::Encoded {
+        self
+    }
+}
+
+impl TableDecode for bytes::Bytes {
+    fn decode(b: &[u8]) -> Result<Self> {
+        Ok(b.to_vec().into())
     }
 }

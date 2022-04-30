@@ -7,7 +7,7 @@ use std::{borrow::Cow, path::Path};
 pub mod tables;
 pub mod traits;
 
-use tables::{TableHandle};
+use tables::TableHandle;
 use traits::{DbFlags, DbName, Mode, Table, TableDecode, TableEncode};
 
 fn open_env<E: EnvironmentKind>(
@@ -34,15 +34,15 @@ impl<M> MdbxEnv<M> {
         &self.inner
     }
     /// Create a read-only mdbx transaction
-    pub fn begin_ro(&self) -> Result<Transaction<'_, RO, NoWriteMap>> {
-        self.inner.begin_ro_txn().map_err(From::from)
+    pub fn begin_ro(&self) -> Result<MdbxTx<'_, RO>> {
+        Ok(MdbxTx::new(self.inner.begin_ro_txn()?))
     }
 }
 
 impl MdbxEnv<RO> {
     /// Open an mdbx environment in read-only mode. Mdbx will still modify the
     /// LCK-file, unless the filesystem is read-only.
-    pub fn open(path: &Path, num_tables: usize, flags: EnvFlags) -> Result<Self> {
+    pub fn open_ro(path: &Path, num_tables: usize, flags: EnvFlags) -> Result<Self> {
         let flags = flags.with_mode(mdbx::Mode::ReadOnly);
         Ok(Self {
             inner: open_env(path, num_tables, flags)?,
@@ -64,8 +64,9 @@ impl MdbxEnv<RW> {
     }
 
     /// Create a read-write mdbx transaction. Blocks if another rw transaction is open.
-    pub fn begin_rw(&self) -> Result<Transaction<'_, RW, NoWriteMap>> {
-        Ok(self.inner().begin_rw_txn()?)
+    pub fn begin_rw(&self) -> Result<MdbxTx<'_, RW>> {
+        Ok(MdbxTx::new(self.inner.begin_rw_txn()?))
+        // Ok(self.inner().begin_rw_txn()?)
     }
 }
 
@@ -116,7 +117,14 @@ where
 }
 
 impl<'env, K: TransactionKind> MdbxTx<'env, K> {
-    pub fn get<'tx, T, F>(&'tx self, db: TableHandle<'tx, T::Name, F>, key: T::Key) -> Result<Option<T::Value>>
+    pub fn new(inner: mdbx::Transaction<'env, K, NoWriteMap>) -> Self {
+        Self { inner }
+    }
+    pub fn get<'tx, T, F>(
+        &'tx self,
+        db: TableHandle<'tx, T::Name, F>,
+        key: T::Key,
+    ) -> Result<Option<T::Value>>
     where
         T: Table<'tx>,
         F: DbFlags,
@@ -134,7 +142,11 @@ impl<'env> MdbxTx<'env, RW> {
         db: TableHandle<'tx, T::Name, F>,
         key: T::Key,
         val: T::Value,
-    ) -> Result<()> where T: Table<'tx>, F: DbFlags, {
+    ) -> Result<()>
+    where
+        T: Table<'tx>,
+        F: DbFlags,
+    {
         self.inner
             .put(db.as_ref(), key.encode(), val.encode(), WriteFlags::UPSERT)
             .map_err(From::from)
