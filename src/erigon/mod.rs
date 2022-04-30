@@ -2,15 +2,15 @@ use crate::kv::traits::{DefaultFlags, Mode, Table};
 use crate::kv::{tables::TableHandle, MdbxTx};
 use ethereum_types::{Address, H256, H64, U256};
 use eyre::{eyre, Result};
+use fastrlp::{Decodable, Encodable};
 use mdbx::TransactionKind;
-use fastrlp::{Encodable, Decodable};
 
 use tables::*;
 
 pub mod models;
 pub mod tables;
 
-use models::{Account, Rlp, BlockHeader, HeaderKey};
+use models::{Account, BlockHeader, BodyForStorage, HeaderKey, Rlp};
 
 /// Erigon wraps an MdbxTx and provides Erigon-specific access methods.
 pub struct Erigon<'env, K: TransactionKind>(pub MdbxTx<'env, K>);
@@ -24,33 +24,58 @@ impl<'env, K: Mode> Erigon<'env, K> {
         self.0.get::<T, T::Flags>(self.0.open_db()?, key)
     }
 
+    /// Returns the hash of the current canonical head header.
     pub fn read_head_header_hash(&self) -> Result<H256> {
         self.read::<LastHeader>(LastHeader)?
-            .ok_or(eyre!("No LastHeader"))
+            .ok_or(eyre!("No value"))
     }
+
+    /// Returns the hash of the current canonical head block.
     pub fn read_head_block_hash(&self) -> Result<H256> {
-        self.read::<LastBlock>(LastBlock)?
-            .ok_or(eyre!("No LastHeader"))
+        self.read::<LastBlock>(LastBlock)?.ok_or(eyre!("No value"))
     }
+
     /// Returns the incarnation of the account when it was last deleted.
-    /// If the account is not in the db, returns 0.
     pub fn read_incarnation(&self, who: Address) -> Result<u64> {
-        self.read::<IncarnationMap>(who)
-            .map(|v| v.unwrap_or_default())
+        self.read::<IncarnationMap>(who)?.ok_or(eyre!("No value"))
     }
+
+    /// Returns the decoded account data as stored in the PlainState table.
     pub fn read_account_data(&self, who: Address) -> Result<Account> {
-        self.read::<PlainState>(who).map(|v| v.unwrap_or_default())
+        self.read::<PlainState>(who)?.ok_or(eyre!("No value"))
     }
+
     /// Returns the number of the block containing the specified transaction.
     pub fn read_transaction_block_number(&self, hash: H256) -> Result<U256> {
         self.read::<BlockTransactionLookup>(hash)?
-            .ok_or(eyre!("No transaction"))
+            .ok_or(eyre!("No value"))
     }
-    pub fn read_header(&self, num: u64, hash: H256) -> Result<BlockHeader> {
-        self.read::<Header>(HeaderKey(num, hash))?.ok_or(eyre!("No header"))
+
+    /// Returns the block header identified by the (block number, block hash) key
+    pub fn read_header(&self, key: HeaderKey) -> Result<BlockHeader> {
+        self.read::<Header>(key)?.ok_or(eyre!("No value"))
     }
+
+    /// Returns the decoding of the body as stored in the BlockBody table
+    pub fn read_body_for_storage(&self, key: HeaderKey) -> Result<BodyForStorage> {
+        let mut body = self.read::<BlockBody>(key)?.ok_or(eyre!("No value"))?;
+
+        // Skip 1 system tx at the beginning of the block and 1 at the end
+        // https://github.com/ledgerwatch/erigon/blob/f56d4c5881822e70f65927ade76ef05bfacb1df4/core/rawdb/accessors_chain.go#L602-L605
+        body.base_tx_id += 1;
+        body.tx_amount = body.tx_amount.checked_sub(2).ok_or_else(|| {
+            eyre!(
+                "Block body has too few txs: {}. HeaderKey: {:?}",
+                body.tx_amount,
+                key,
+            )
+        })?;
+        Ok(body)
+    }
+
+    /// Returns the header number assigned to a hash.
     pub fn read_header_number(&self, hash: H256) -> Result<u64> {
-        self.read::<HeaderNumber>(hash)?.ok_or(eyre!("No header number"))
+        self.read::<HeaderNumber>(hash)?.ok_or(eyre!("No value"))
     }
 }
 impl<'env> Erigon<'env, mdbx::RW> {
@@ -80,22 +105,10 @@ impl<'env> Erigon<'env, mdbx::RW> {
     pub fn write_header_number(&self, k: H256, v: u64) -> Result<()> {
         self.write::<HeaderNumber>(k, v)
     }
-    pub fn write_header(&self, num: u64, hash: H256, header: BlockHeader) -> Result<()> {
-        self.write::<Header>(HeaderKey(num, hash), header)
+    pub fn write_header(&self, k: HeaderKey, v: BlockHeader) -> Result<()> {
+        self.write::<Header>(k, v)
+    }
+    pub fn write_body_for_storage(&self, k: HeaderKey, v: BodyForStorage) -> Result<()> {
+        self.write::<BlockBody>(k, v)
     }
 }
-
-// // https://github.com/ledgerwatch/erigon-lib/blob/625c9f5385d209dc2abfadedf6e4b3914a26ed3e/kv/mdbx/kv_mdbx.go#L154
-// const ENV_FLAGS: EnvFlags = EnvFlags {
-//     // Disable readahead. Improves performance when db size > RAM.
-//     no_rdahead: true,
-//     // Try to coalesce while garbage collecting. (https://en.wikipedia.org/wiki/Coalescing_(computer_science))
-//     coalesce: true,
-//     // If another process is using the db with different flags, open in
-//     // compatibility mode instead of MDBX_INCOMPATIBLE error.
-//     accede: true,
-//     no_sub_dir: false,
-//     exclusive: false,
-//     no_meminit: false,
-//     liforeclaim: false,
-// };

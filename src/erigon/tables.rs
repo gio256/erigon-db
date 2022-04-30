@@ -1,6 +1,6 @@
 use crate::{
     decl_table,
-    erigon::models::{BodyForStorage, Rlp, Account, HeaderKey, BlockHeader, StorageKey},
+    erigon::models::{Account, BlockHeader, BodyForStorage, HeaderKey, Rlp, StorageKey},
     kv::{tables::TableHandle, traits::*, EnvFlags},
 };
 use ethereum_types::{Address, H256, U256};
@@ -34,10 +34,9 @@ decl_table!(IncarnationMap          => Address          => u64);
 decl_table!(BlockTransactionLookup  => H256             => U256);
 decl_table!(PlainState              => Address          => Account);
 decl_table!(HeaderNumber            => H256             => u64);
-// decl_table!(Header                  => HeaderKey        => Rlp); // RLP encoded headers
-decl_table!(Header                  => HeaderKey        => BlockHeader); // RLP encoded headers
+decl_table!(Header                  => HeaderKey        => BlockHeader);
 
-// decl_table!(BlockBody               => HeaderKey        => BodyForStorage);
+decl_table!(BlockBody               => HeaderKey        => BodyForStorage);
 
 decl_table!(PlainContractCode       => (Address, u64)   => H256);
 // decl_table!(BlockBody               => HeaderKey        => models::BodyForStorage, SeekKey = u64);

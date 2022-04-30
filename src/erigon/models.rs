@@ -2,7 +2,7 @@ use bytes::{Buf, Bytes};
 use derive_more::{Deref, DerefMut};
 use ethereum_types::{Address, Bloom, H256, H64, U256};
 use eyre::{eyre, Result};
-use fastrlp::{Encodable, Decodable, DecodeError, BufMut, RlpEncodable, RlpDecodable};
+use fastrlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +47,7 @@ impl TableDecode for Rlp {
 
 #[derive(
     Clone,
+    Copy,
     Debug,
     PartialEq,
     Eq,
@@ -79,10 +80,7 @@ impl TableDecode for HeaderKey {
             return Err(TooShort::<{ U64_LENGTH }> { got: b.len() }.into());
         }
         let (num, hash) = b.split_at(U64_LENGTH);
-        Ok(Self(
-            TableDecode::decode(num)?,
-            TableDecode::decode(hash)?,
-        ))
+        Ok(Self(TableDecode::decode(num)?, TableDecode::decode(hash)?))
     }
 }
 
@@ -221,43 +219,35 @@ impl TableDecode for StorageKey {
 
 ////
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode, RlpDecodable)]
+macro_rules! rlp_table_value {
+    ($t:ty) => {
+        impl TableEncode for $t {
+            type Encoded = ::bytes::Bytes;
+            fn encode(self) -> Self::Encoded {
+                let mut buf = ::bytes::BytesMut::new();
+                ::fastrlp::Encodable::encode(&self, &mut buf);
+                buf.into()
+            }
+        }
+        impl TableDecode for $t {
+            fn decode(mut b: &[u8]) -> Result<Self> {
+                ::fastrlp::Decodable::decode(&mut b).map_err(From::from)
+            }
+        }
+    };
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode, RlpEncodable, RlpDecodable,
+)]
 pub struct BodyForStorage {
     pub base_tx_id: u64,
     pub tx_amount: u32,
     pub uncles: Vec<BlockHeader>,
 }
+rlp_table_value!(BodyForStorage);
 
-impl TableEncode for BlockHeader {
-    type Encoded = bytes::Bytes;
-    fn encode(self) -> Self::Encoded {
-        let mut buf = bytes::BytesMut::new();
-        Encodable::encode(&self, &mut buf);
-        buf.into()
-    }
-}
-impl TableDecode for BlockHeader {
-    fn decode(mut b: &[u8]) -> Result<Self> {
-        Decodable::decode(&mut b).map_err(From::from)
-    }
-}
-
-// #[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut)]
-// struct BlockNumber(u64);
-// crate::u64_table_object!(BlockNumber);
-// u64_table_object!(TxIndex);
-
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    Encode,
-    Decode,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Encode, Decode)]
 pub struct BlockHeader {
     pub parent_hash: H256,
     pub uncle_hash: H256,
@@ -277,6 +267,8 @@ pub struct BlockHeader {
     pub base_fee: Option<U256>,
     pub seal: Option<Rlp>,
 }
+
+rlp_table_value!(BlockHeader);
 
 impl BlockHeader {
     fn rlp_header(&self) -> fastrlp::Header {

@@ -351,7 +351,6 @@ where
     }
 }
 
-
 impl TableEncode for bytes::Bytes {
     type Encoded = Self;
 
