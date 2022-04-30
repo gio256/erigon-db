@@ -13,22 +13,29 @@ pub trait TableObject: TableEncode + TableDecode {}
 
 impl<T> TableObject for T where T: TableEncode + TableDecode {}
 
-pub trait DbName {
-    fn db_name() -> Option<&'static str>;
-}
-
 pub trait Table<'tx>: Send + Sync + Debug + 'static {
+    type Name: DbName;
     type Key: TableEncode;
     type Value: TableObject;
     type SeekKey: TableEncode;
-    type Dbi: AsRef<mdbx::Database<'tx>>;
 }
 
 pub trait DupSort<'tx>: Table<'tx> {
     type SeekBothKey: TableObject;
 }
 
-pub trait Mode {
+pub trait DbName {
+    const NAME: &'static str;
+}
+
+pub trait DbFlags {
+    const FLAGS: mdbx::DatabaseFlags;
+}
+pub trait DefaultFlags {
+    type Flags: DbFlags;
+}
+
+pub trait Mode: mdbx::TransactionKind {
     fn is_writeable() -> bool;
 }
 impl<'env> Mode for mdbx::RO {

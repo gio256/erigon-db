@@ -1,8 +1,7 @@
 use crate::kv::MdbxTx;
-use arrayref::array_ref;
 use arrayvec::ArrayVec;
 use derive_more::{Deref, DerefMut};
-use ethers::types::{Address, H256, U256};
+use ethereum_types::{Address, H256, U256};
 use eyre::{eyre, Result};
 use mdbx::{DatabaseFlags, NoWriteMap, TransactionKind};
 use std::{
@@ -16,12 +15,11 @@ use crate::kv::traits::*;
 const KECCAK_LENGTH: usize = 32;
 const ADDRESS_LENGTH: usize = 20;
 
-pub type DbFlags = u32;
-pub struct TableHandle<'tx, Dbi, const FLAGS: DbFlags> {
+pub struct TableHandle<'tx, Dbi, Flags: DbFlags> {
     inner: mdbx::Database<'tx>,
-    _dbi: std::marker::PhantomData<Dbi>,
+    _dbi: std::marker::PhantomData<(Dbi, Flags)>,
 }
-impl<'tx, Dbi, const FLAGS: DbFlags> TableHandle<'tx, Dbi, FLAGS> {
+impl<'tx, Dbi, Flags: DbFlags> TableHandle<'tx, Dbi, Flags> {
     pub fn new(inner: mdbx::Database<'tx>) -> Self {
         Self {
             inner,
@@ -32,35 +30,42 @@ impl<'tx, Dbi, const FLAGS: DbFlags> TableHandle<'tx, Dbi, FLAGS> {
         &self.inner
     }
 }
-impl<'tx, Dbi, const FLAGS: DbFlags> Deref for TableHandle<'tx, Dbi, FLAGS> {
+impl<'tx, Dbi, Flags: DbFlags> Deref for TableHandle<'tx, Dbi, Flags> {
     type Target = mdbx::Database<'tx>;
     fn deref(&self) -> &Self::Target {
         self.inner()
     }
 }
-impl<'tx, Dbi, const FLAGS: DbFlags> AsRef<mdbx::Database<'tx>> for TableHandle<'tx, Dbi, FLAGS> {
+impl<'tx, Dbi, Flags: DbFlags> AsRef<mdbx::Database<'tx>> for TableHandle<'tx, Dbi, Flags> {
     fn as_ref(&self) -> &mdbx::Database<'tx> {
         self.inner()
     }
 }
 
+//TODO
+pub struct NoFlags;
+impl DbFlags for NoFlags {
+    const FLAGS: DatabaseFlags = DatabaseFlags::empty();
+}
+pub struct DupSortFlags;
+impl DbFlags for DupSortFlags {
+    const FLAGS: DatabaseFlags = DatabaseFlags::DUP_SORT;
+}
 #[macro_export]
 macro_rules! decl_table_without_flags {
-    ($name:ident => $key:ty => $value:ty; seek_by: $seek_key:ty) => {
+    ($name:ident => $key:ty => $value:ty, SeekKey = $seek_key:ty) => {
         #[derive(Debug, Default, Clone, Copy)]
         pub struct $name;
 
         impl<'tx> $crate::kv::traits::Table<'tx> for $name {
+            type Name = Self;
             type Key = $key;
             type SeekKey = $seek_key;
             type Value = $value;
-            type Dbi = $crate::kv::tables::TableHandle<'tx, Self, { Self::flags() }>;
         }
 
         impl $crate::kv::traits::DbName for $name {
-            fn db_name() -> Option<&'static str> {
-                Some(stringify!($name))
-            }
+            const NAME: &'static str = stringify!($name);
         }
 
         impl std::fmt::Display for $name {
@@ -70,7 +75,7 @@ macro_rules! decl_table_without_flags {
         }
     };
     ($name:ident => $key:ty => $value:ty) => {
-        $crate::decl_table_without_flags!($name => $key => $value; seek_by: $key);
+        $crate::decl_table_without_flags!($name => $key => $value, SeekKey = $key);
     };
 }
 
@@ -78,21 +83,20 @@ macro_rules! decl_table_without_flags {
 macro_rules! decl_table {
     ($name:ident => $($args:tt)*) => {
         $crate::decl_table_without_flags!($name => $($args)*);
-        impl $name {
-            pub const fn flags() -> u32 {
-                0
-            }
+        impl $crate::kv::traits::DefaultFlags for $name {
+            type Flags = $crate::kv::tables::NoFlags;
         }
     };
 }
 #[macro_export]
 macro_rules! decl_dupsort_table {
-    ($name:ident => $($args:tt)*) => {
+    ($name:ident => $($args:tt)*; SeekBothKey = $seek_both:ty) => {
         $crate::decl_table_without_flags!($name => $($args)*);
-        impl $name {
-            pub const fn flags() -> u32 {
-                ::mdbx::DatabaseFlags::DUP_SORT.bits()
-            }
+        impl $crate::kv::traits::DefaultFlags for $name {
+            type Flags = $crate::kv::tables::DupSortFlags;
+        }
+        impl crate::kv::traits::DupSort<'_> for $name {
+            type SeekBothKey = $seek_both;
         }
     };
 }
@@ -228,22 +232,22 @@ impl TableEncode for U256 {
     type Encoded = VariableVec<KECCAK_LENGTH>;
     fn encode(self) -> Self::Encoded {
         todo!() //TODO
-        // self.to_be_bytes()
-        //     .into_iter()
-        //     .skip_while(|&v| v == 0)
-        //     .collect()
+                // self.to_be_bytes()
+                //     .into_iter()
+                //     .skip_while(|&v| v == 0)
+                //     .collect()
     }
 }
 
 impl TableDecode for U256 {
     fn decode(b: &[u8]) -> Result<Self> {
         todo!() //TODO
-        // if b.len() > KECCAK_LENGTH {
-        //     return Err(TooLong::<KECCAK_LENGTH> { got: b.len() }.into());
-        // }
-        // let mut v = [0; 32];
-        // v[KECCAK_LENGTH - b.len()..].copy_from_slice(b);
-        // Ok(Self::from_be_bytes(v))
+                // if b.len() > KECCAK_LENGTH {
+                //     return Err(TooLong::<KECCAK_LENGTH> { got: b.len() }.into());
+                // }
+                // let mut v = [0; 32];
+                // v[KECCAK_LENGTH - b.len()..].copy_from_slice(b);
+                // Ok(Self::from_be_bytes(v))
     }
 }
 
@@ -264,9 +268,10 @@ impl TableDecode for Address {
     }
 }
 
+#[macro_export]
 macro_rules! u64_table_object {
     ($ty:ident) => {
-        impl TableEncode for $ty {
+        impl $crate::kv::traits::TableEncode for $ty {
             type Encoded = [u8; 8];
 
             fn encode(self) -> Self::Encoded {
@@ -274,11 +279,11 @@ macro_rules! u64_table_object {
             }
         }
 
-        impl TableDecode for $ty {
+        impl $crate::kv::traits::TableDecode for $ty {
             fn decode(b: &[u8]) -> Result<Self> {
                 match b.len() {
-                    8 => Ok(u64::from_be_bytes(*array_ref!(&*b, 0, 8)).into()),
-                    other => Err(InvalidLength::<8> { got: other }.into()),
+                    8 => Ok(u64::from_be_bytes(*::arrayref::array_ref!(&*b, 0, 8)).into()),
+                    other => Err($crate::kv::tables::InvalidLength::<8> { got: other }.into()),
                 }
             }
         }
@@ -311,5 +316,36 @@ impl TableDecode for (H256, U256) {
         let (location, value) = b.split_at(KECCAK_LENGTH);
 
         Ok((H256::decode(location)?, U256::decode(value)?))
+    }
+}
+
+impl<A, B, const A_LEN: usize, const B_LEN: usize> TableEncode for (A, B)
+where
+    A: TableObject<Encoded = [u8; A_LEN]>,
+    B: TableObject<Encoded = [u8; B_LEN]>,
+{
+    type Encoded = VariableVec<256>;
+
+    fn encode(self) -> Self::Encoded {
+        let mut v = Self::Encoded::default();
+        v.try_extend_from_slice(&self.0.encode()).unwrap();
+        v.try_extend_from_slice(&self.1.encode()).unwrap();
+        v
+    }
+}
+
+impl<A, B, const A_LEN: usize, const B_LEN: usize> TableDecode for (A, B)
+where
+    A: TableObject<Encoded = [u8; A_LEN]>,
+    B: TableObject<Encoded = [u8; B_LEN]>,
+{
+    fn decode(v: &[u8]) -> Result<Self> {
+        if v.len() != A_LEN + B_LEN {
+            eyre::bail!("Invalid len: {} != {} + {}", v.len(), A_LEN, B_LEN);
+        }
+        Ok((
+            A::decode(&v[..A_LEN]).unwrap(),
+            B::decode(&v[A_LEN..]).unwrap(),
+        ))
     }
 }

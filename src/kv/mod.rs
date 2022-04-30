@@ -7,8 +7,8 @@ use std::{borrow::Cow, path::Path};
 pub mod tables;
 pub mod traits;
 
-use tables::{DbFlags, TableHandle};
-use traits::{DbName, Mode, Table, TableDecode, TableEncode};
+use tables::{TableHandle};
+use traits::{DbFlags, DbName, Mode, Table, TableDecode, TableEncode};
 
 fn open_env<E: EnvironmentKind>(
     path: &Path,
@@ -102,21 +102,25 @@ impl<'env, M> MdbxTx<'env, M>
 where
     M: TransactionKind + Mode,
 {
-    pub fn open_db<'tx, Dbi: DbName, const FLAGS: DbFlags>(
+    pub fn open_db<'tx, Db: DbName, Flags: DbFlags>(
         &'tx self,
-    ) -> Result<TableHandle<'tx, Dbi, FLAGS>> {
-        let mut flags = DatabaseFlags::from_bits(FLAGS).ok_or(eyre!("Bad db flags"))?;
+    ) -> Result<TableHandle<'tx, Db, Flags>> {
+        let mut flags = Flags::FLAGS;
         if M::is_writeable() {
-            flags.insert(DatabaseFlags::CREATE);
+            flags |= DatabaseFlags::CREATE;
         }
         Ok(TableHandle::new(
-            self.inner.open_db_with_flags(Dbi::db_name(), flags)?,
+            self.inner.open_db_with_flags(Some(Db::NAME), flags)?,
         ))
     }
 }
 
 impl<'env, K: TransactionKind> MdbxTx<'env, K> {
-    pub fn get<'tx, T: Table<'tx>>(&'tx self, db: T::Dbi, key: T::Key) -> Result<Option<T::Value>> {
+    pub fn get<'tx, T, F>(&'tx self, db: TableHandle<'tx, T::Name, F>, key: T::Key) -> Result<Option<T::Value>>
+    where
+        T: Table<'tx>,
+        F: DbFlags,
+    {
         self.inner
             .get::<Cow<[u8]>>(db.as_ref(), key.encode().as_ref())?
             .map(|c| T::Value::decode(&c))
@@ -125,12 +129,12 @@ impl<'env, K: TransactionKind> MdbxTx<'env, K> {
 }
 
 impl<'env> MdbxTx<'env, RW> {
-    pub fn set<'tx, T: Table<'tx>>(
+    pub fn set<'tx, T, F>(
         &'tx self,
-        db: T::Dbi,
+        db: TableHandle<'tx, T::Name, F>,
         key: T::Key,
         val: T::Value,
-    ) -> Result<()> {
+    ) -> Result<()> where T: Table<'tx>, F: DbFlags, {
         self.inner
             .put(db.as_ref(), key.encode(), val.encode(), WriteFlags::UPSERT)
             .map_err(From::from)
