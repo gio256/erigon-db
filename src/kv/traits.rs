@@ -28,7 +28,6 @@ pub trait DupSort<'tx>: Table<'tx> {
     type SeekBothKey: TableObject;
 }
 
-
 pub trait Mode {
     fn is_writeable() -> bool;
 }

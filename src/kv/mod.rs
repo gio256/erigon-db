@@ -1,9 +1,14 @@
 use eyre::{eyre, Result};
-use mdbx::{EnvironmentKind, NoWriteMap, Transaction, TransactionKind, RO, RW};
-use std::path::Path;
+use mdbx::{
+    DatabaseFlags, EnvironmentKind, NoWriteMap, Transaction, TransactionKind, WriteFlags, RO, RW,
+};
+use std::{borrow::Cow, path::Path};
 
-mod tables;
-mod traits;
+pub mod tables;
+pub mod traits;
+
+use tables::{DbFlags, TableHandle};
+use traits::{DbName, Mode, Table, TableDecode, TableEncode};
 
 fn open_env<E: EnvironmentKind>(
     path: &Path,
@@ -20,7 +25,7 @@ fn open_env<E: EnvironmentKind>(
 pub struct MdbxEnv<M> {
     // Force NoWriteMap. MDBX_WRITEMAP mode maps data into memory with
     // write permission. This means stray writes through pointers can silently
-    // corrupt the db. It's also slower when db size > RAM, so ignore it
+    // corrupt the db. It's also slower when db size > RAM, so we ignore it
     inner: mdbx::Environment<NoWriteMap>,
     _mode: std::marker::PhantomData<M>,
 }
@@ -93,9 +98,6 @@ impl EnvFlags {
 pub struct MdbxTx<'env, K: TransactionKind> {
     pub inner: mdbx::Transaction<'env, K, NoWriteMap>,
 }
-use tables::{DbFlags, TableHandle};
-use traits::{Mode, DbName, Table, TableEncode, TableDecode};
-use mdbx::DatabaseFlags;
 impl<'env, M> MdbxTx<'env, M>
 where
     M: TransactionKind + Mode,
@@ -115,26 +117,22 @@ where
 
 impl<'env, K: TransactionKind> MdbxTx<'env, K> {
     pub fn get<'tx, T: Table<'tx>>(&'tx self, db: T::Dbi, key: T::Key) -> Result<Option<T::Value>> {
-        Ok(self
-            .inner
-            .get::<TableObjectWrapper<_>>(db.as_ref(), key.encode().as_ref())?
-            .map(|v| v.0))
+        self.inner
+            .get::<Cow<[u8]>>(db.as_ref(), key.encode().as_ref())?
+            .map(|c| T::Value::decode(&c))
+            .transpose()
     }
 }
 
-#[derive(Clone, Debug)]
-struct TableObjectWrapper<T>(T);
-
-impl<'tx, T> ::mdbx::TableObject<'tx> for TableObjectWrapper<T>
-where
-    T: TableDecode,
-{
-    fn decode(data_val: &[u8]) -> Result<Self, ::mdbx::Error>
-    where
-        Self: Sized,
-    {
-        T::decode(data_val)
-            .map_err(|e| ::mdbx::Error::DecodeError(e.into()))
-            .map(Self)
+impl<'env> MdbxTx<'env, RW> {
+    pub fn set<'tx, T: Table<'tx>>(
+        &'tx self,
+        db: T::Dbi,
+        key: T::Key,
+        val: T::Value,
+    ) -> Result<()> {
+        self.inner
+            .put(db.as_ref(), key.encode(), val.encode(), WriteFlags::UPSERT)
+            .map_err(From::from)
     }
 }
