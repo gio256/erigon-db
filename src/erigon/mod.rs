@@ -1,12 +1,12 @@
 use crate::kv::{
     tables::TableHandle,
     traits::{DefaultFlags, Mode, Table},
-    MdbxCursor, MdbxTx,
+    MdbxCursor, MdbxTx, MdbxEnv, EnvFlags,
 };
 use ethereum_types::{Address, H256, H64, U256};
 use eyre::{eyre, Result};
 use fastrlp::{Decodable, Encodable};
-use mdbx::TransactionKind;
+use mdbx::{TransactionKind, RO, RW};
 
 use tables::*;
 
@@ -18,8 +18,37 @@ use models::{
     StorageKey,
 };
 
+pub const NUM_TABLES: usize = 50;
+// https://github.com/ledgerwatch/erigon-lib/blob/625c9f5385d209dc2abfadedf6e4b3914a26ed3e/kv/mdbx/kv_mdbx.go#L154
+pub const ENV_FLAGS: EnvFlags = EnvFlags {
+    no_rdahead: true,
+    coalesce: true,
+    accede: true,
+    no_sub_dir: false,
+    exclusive: false,
+    no_meminit: false,
+    liforeclaim: false,
+};
+
 /// Erigon wraps an MdbxTx and provides Erigon-specific access methods.
 pub struct Erigon<'env, K: TransactionKind>(pub MdbxTx<'env, K>);
+
+impl<'env> Erigon<'env, RO> {
+    pub fn open_ro(path: &std::path::Path) -> Result<MdbxEnv<RO>> {
+        MdbxEnv::open_ro(path, NUM_TABLES, ENV_FLAGS)
+    }
+    pub fn begin(env: &'env MdbxEnv<RO>) -> Result<Self> {
+        env.begin_ro().map(Self)
+    }
+}
+impl<'env> Erigon<'env, RW> {
+    pub fn open_rw(path: &std::path::Path) -> Result<MdbxEnv<RW>> {
+        MdbxEnv::open_rw(path, NUM_TABLES, ENV_FLAGS)
+    }
+    pub fn begin_rw(env: &'env MdbxEnv<RW>) -> Result<Self> {
+        env.begin_rw().map(Self)
+    }
+}
 
 impl<'env, K: Mode> Erigon<'env, K> {
     /// Opens and reads from the db table with the table's default flags
@@ -29,6 +58,8 @@ impl<'env, K: Mode> Erigon<'env, K> {
     {
         self.0.get::<T, T::Flags>(self.0.open_db()?, key)
     }
+    /// Opens a table with the table's default flags and creates a cursor into
+    /// the opened table.
     pub fn cursor<'tx, T>(&'tx self) -> Result<MdbxCursor<'tx, K, T>>
     where
         T: Table<'tx> + DefaultFlags,
@@ -109,8 +140,8 @@ impl<'env, K: Mode> Erigon<'env, K> {
     /// Determines whether a header with the given hash is on the canonical chain.
     pub fn is_canonical_hash(&mut self, hash: H256) -> Result<bool> {
         let num = self.read_header_number(hash)?;
-        let can_hash = self.read_canonical_hash(num)?;
-        Ok(can_hash != Default::default() && can_hash == hash)
+        let canon = self.read_canonical_hash(num)?;
+        Ok(canon != Default::default() && canon == hash)
     }
 
     /// Returns the value of the storage for account `who` indexed by `key`.
@@ -152,7 +183,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
 }
 
 impl<'env> Erigon<'env, mdbx::RW> {
-    /// Opens and writes to the db table with the table's default flags
+    /// Opens and writes to the db table with the table's default flags.
     pub fn write<'tx, T>(&'tx self, key: T::Key, val: T::Value) -> Result<()>
     where
         T: Table<'tx> + DefaultFlags,

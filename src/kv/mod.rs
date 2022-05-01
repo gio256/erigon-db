@@ -22,19 +22,21 @@ fn open_env<E: EnvironmentKind>(
         .map_err(From::from)
 }
 
-/// A wrapper around [`mdbx::Environment`]. 
+/// A wrapper around [`mdbx::Environment`].
 ///
 /// We use this wrapper to make a few alterations on the default behavior:
 /// - The mode the environment is opened in becomes part of the type signature.
 /// You cannot open a read-write transaction using a `MdbxEnv<RO>`, and you
-/// cannot get a `MdbxEnv<RW>` from a `MdbxEnv<RO>`.
+/// cannot get a `MdbxEnv<RW>` from a `MdbxEnv<RO>`. You can, however, move out
+/// of the struct and do whatever you want with the inner `mdbx::Environment`,
+/// safe or unsafe.
 /// - The `mdbx::EnvironmentKind` is forced to `NoWriteMap`. MDBX_WRITEMAP
 /// mode maps data into memory with write permission. This means stray writes
 /// through pointers can silently corrupt the db. It's also slower when
 /// db size > RAM, so we ignore it.
 #[derive(Debug)]
 pub struct MdbxEnv<M> {
-    inner: mdbx::Environment<NoWriteMap>,
+    pub inner: mdbx::Environment<NoWriteMap>,
     _mode: std::marker::PhantomData<M>,
 }
 impl<M> MdbxEnv<M> {

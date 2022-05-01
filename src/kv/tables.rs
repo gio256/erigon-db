@@ -42,7 +42,6 @@ impl<'tx, Dbi, Flags: DbFlags> AsRef<mdbx::Database<'tx>> for TableHandle<'tx, D
     }
 }
 
-//TODO
 pub struct NoFlags;
 impl DbFlags for NoFlags {
     const FLAGS: DatabaseFlags = DatabaseFlags::empty();
@@ -231,10 +230,6 @@ impl TableDecode for H256 {
 impl TableEncode for U256 {
     type Encoded = VariableVec<KECCAK_LENGTH>;
     fn encode(self) -> Self::Encoded {
-        // self.to_be_bytes()
-        //     .into_iter()
-        //     .skip_while(|&v| v == 0)
-        //     .collect()
         let mut buf = [0; 32];
         self.to_big_endian(&mut buf);
         buf.into_iter().skip_while(|&v| v == 0).collect()

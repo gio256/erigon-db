@@ -7,9 +7,9 @@ use crate::{
 use ethereum_types::{Address, H256, U256};
 use mdbx::DatabaseFlags;
 
-/// The latest header and latest block are stored in their own tables, addressed
-/// by a dummy key ("LastHeader" and "LastBlock", respectively). We encode the
-/// names of these tables as their own keys to prevent invalid accesses.
+// The latest header and latest block are stored in their own tables, addressed
+// by a dummy key ("LastHeader" and "LastBlock", respectively). We encode the
+// names of these tables as their own keys to prevent invalid accesses.
 macro_rules! encode_const {
     ($name:ident, $encoded:ident) => {
         impl TableEncode for $name {
@@ -56,9 +56,11 @@ table!(ContractCode => ContractCodeKey => H256);
 // block number => address | encoded account
 // dupsort_table!(AccountChangeSet => u64 => (Address, Account), Subkey = Address);
 // block number | address | incarnation => plain_storage_key | value
-dupsort_table!(StorageChangeSet => (u64, StorageKey) => (H256, H256), Subkey = H256);
+dupsort_table!(StorageChangeSet => (BlockNumber, StorageKey) => (H256, H256), Subkey = H256);
 
-// Manually implement storage table because it overlaps with PlainState
+// Manually implement the storage table because it overlaps with PlainState
+// (that is, there are two things stored in the table with different key encodings,
+// and our macros are too simple to handle this).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Storage;
 impl<'tx> crate::kv::traits::Table<'tx> for Storage {
