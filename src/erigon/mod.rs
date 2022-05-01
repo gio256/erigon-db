@@ -14,8 +14,8 @@ pub mod models;
 pub mod tables;
 
 use models::{
-    Account, BlockHeader, BlockNumber, BodyForStorage, Bytecode, HeaderKey, Incarnation, Rlp,
-    StorageKey,
+    Account, BlockHeader, BlockNumber, BodyForStorage, Bytecode, HeaderKey, Incarnation, Rlp, PlainCodeKey,
+    StorageHistKey, StorageKey,
 };
 
 pub const NUM_TABLES: usize = 50;
@@ -83,13 +83,13 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the incarnation of the account when it was last deleted.
-    pub fn read_incarnation(&self, who: Address) -> Result<Option<Incarnation>> {
-        self.read::<IncarnationMap>(who)
+    pub fn read_incarnation(&self, adr: Address) -> Result<Option<Incarnation>> {
+        self.read::<IncarnationMap>(adr)
     }
 
     /// Returns the decoded account data as stored in the PlainState table.
-    pub fn read_account_data(&self, who: Address) -> Result<Option<Account>> {
-        self.read::<PlainState>(who)
+    pub fn read_account_data(&self, adr: Address) -> Result<Option<Account>> {
+        self.read::<PlainState>(adr)
     }
 
     /// Returns the number of the block containing the specified transaction.
@@ -150,26 +150,24 @@ impl<'env, K: Mode> Erigon<'env, K> {
         Ok(canon != Default::default() && canon == hash)
     }
 
-    /// Returns the value of the storage for account `who` indexed by `key`.
-    pub fn read_storage(&self, who: Address, inc: Incarnation, key: H256) -> Result<Option<U256>> {
-        let bucket = StorageKey::new(who, inc);
+    /// Returns the value of the storage for account `adr` indexed by `key`.
+    pub fn read_storage(&self, adr: Address, inc: Incarnation, key: H256) -> Result<Option<U256>> {
+        let bucket = StorageKey::new(adr, inc);
         let mut cur = self.cursor::<Storage>()?;
         cur.seek_dup(bucket, key)
             .map(|kv| kv.and_then(|(k, v)| if k == key { Some(v) } else { None }))
     }
 
-    // /// Returns an iterator over all of the storage (key, value) pairs for the
-    // /// given address and account incarnation.
-    // pub fn walk_storage(
-    //     &self,
-    //     who: Address,
-    //     inc: Incarnation,
-    // ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
-    //     let start_key = StorageKey::new(who, inc);
-    //     self.cursor::<Storage>()?.walk_dup(start_key)
-    // }
-
-    // pub fn stream_transactions(&)
+    /// Returns an iterator over all of the storage (key, value) pairs for the
+    /// given address and account incarnation.
+    pub fn walk_storage(
+        &self,
+        adr: Address,
+        inc: Incarnation,
+    ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
+        let start_key = StorageKey::new(adr, inc);
+        self.cursor::<Storage>()?.walk_dup(start_key)
+    }
 
     /// Returns the code associated with the given codehash.
     pub fn read_code(&self, codehash: H256) -> Result<Option<Bytecode>> {
@@ -178,7 +176,55 @@ impl<'env, K: Mode> Erigon<'env, K> {
         }
         self.read::<Code>(codehash)
     }
+
+    /// Returns the code associated with the given codehash.
+    pub fn read_codehash(&self, adr: Address, inc: Incarnation) -> Result<Option<H256>> {
+        let key = PlainCodeKey(adr, inc);
+        self.read::<PlainCodeHash>(key)
+    }
+
+    // (address, block_num) => bitmap
+    // from bitmap we extract the smallest block >= block_num where the account changed
+    pub fn read_account_hist(&self, adr: Address, block: BlockNumber) -> Result<Option<Account>> {
+        let mut hist_cur = self.cursor::<AccountHistory>()?;
+        let mut cs_cur = self.cursor::<AccountChangeSet>()?;
+        // The value from AccountHistory at the first key >= block.
+        let (_, bitmap) = hist_cur.seek((adr, block))?.ok_or(eyre!("No value"))?;
+        let cs_block = BlockNumber(find(bitmap, *block));
+        // // look for cs_block, addresss
+        if let Some((k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
+            if k == adr {
+                if acct.incarnation > 0 && acct.codehash == Default::default() {
+                    acct.codehash = self.read_codehash(adr, acct.incarnation)?.ok_or(eyre!("No value"))?
+                }
+                return Ok(Some(acct))
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn read_storage_hist(&self, adr: Address, inc: Incarnation, slot: H256, block: BlockNumber) -> Result<Option<U256>> {
+        let mut hist_cur = self.cursor::<StorageHistory>()?;
+        let mut cs_cur = self.cursor::<StorageChangeSet>()?;
+        let (_, bitmap) = hist_cur.seek(StorageHistKey(adr, slot, block))?.ok_or(eyre!("No value"))?;
+        let cs_block = BlockNumber(find(bitmap, *block));
+        let cs_key = (cs_block, StorageKey::new(adr, inc));
+        if let Some((k, v)) = cs_cur.seek_dup(cs_key, slot)? {
+            if k == slot {
+                return Ok(Some(v))
+            }
+        }
+        Ok(None)
+    }
 }
+use roaring::RoaringTreemap;
+fn find(map: RoaringTreemap, n: u64) -> u64 {
+    let rank = map.rank(n.saturating_sub(1));
+    map.select(rank).unwrap()
+}
+// fn read_hist<'tx, K, TH, TC>(hist_cur: &mut MdbxCursor<'tx, K, TH>, changeset_cur: &mut MdbxCursor<'tx, K, TC>) where K: TransactionKind {
+
+// }
 
 impl<'env> Erigon<'env, mdbx::RW> {
     /// Opens and writes to the db table with the table's default flags.
@@ -218,7 +264,14 @@ impl<'env> Erigon<'env, mdbx::RW> {
 // pub fn stream_transactions<'tx, K>(cur: &mut MdbxCursor<'tx, K, BlockTransaction>, start_key: u64) -> impl Iterator<Item= Result<>> where K: TransactionKind, {
 //     todo!()
 // }
-// pub fn walk_storage<'tx, K>(cur: &mut MdbxCursor<'tx, K, Storage>, who: Address, inc: Incarnation) -> Result<impl Iterator<Item=Result<(H256, U256)>>> where K: TransactionKind {
+// pub fn walk_storage<'tx, 'cur, K>(
+//     cur: &'cur mut MdbxCursor<'tx, K, Storage>,
+//     who: Address,
+//     inc: Incarnation,
+// ) -> Result<impl Iterator<Item = Result<(H256, U256)>> + 'cur>
+// where
+//     K: TransactionKind,
+// {
 //     let start_key = StorageKey::new(who, inc);
 //     cur.walk_dup(start_key)
 // }

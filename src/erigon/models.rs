@@ -7,6 +7,7 @@ use fastrlp::{
     RlpMaxEncodedLen,
 };
 // use fastrlp::*;
+use croaring::{treemap::NativeSerializer, Treemap};
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,36 @@ use crate::kv::{
     tables::{TooLong, TooShort, VariableVec},
     traits::{TableDecode, TableEncode},
 };
+
+impl TableEncode for Treemap {
+    type Encoded = Vec<u8>;
+    fn encode(mut self) -> Self::Encoded {
+        self.run_optimize();
+        self.serialize().unwrap()
+    }
+}
+impl TableDecode for Treemap {
+    fn decode(b: &[u8]) -> Result<Self> {
+        Ok(Treemap::deserialize(b)?)
+    }
+}
+
+use roaring::RoaringTreemap;
+impl TableEncode for RoaringTreemap {
+    type Encoded = Vec<u8>;
+    fn encode(mut self) -> Self::Encoded {
+        let mut buf = Vec::with_capacity(self.serialized_size());
+        self.serialize_into(&mut buf).unwrap();
+        buf
+    }
+}
+impl TableDecode for RoaringTreemap {
+    fn decode(b: &[u8]) -> Result<Self> {
+        Ok(RoaringTreemap::deserialize_from(b)?)
+    }
+}
+
+
 
 pub const KECCAK_LENGTH: usize = H256::len_bytes();
 pub const ADDRESS_LENGTH: usize = Address::len_bytes();
@@ -58,35 +89,6 @@ macro_rules! bytes_wrapper {
 }
 bytes_wrapper!(Rlp);
 bytes_wrapper!(Bytecode);
-
-// #[derive(
-//     Clone,
-//     Debug,
-//     PartialEq,
-//     Eq,
-//     Default,
-//     Deref,
-//     DerefMut,
-//     Serialize,
-//     Deserialize,
-//     Encode,
-//     Decode,
-//     RlpEncodable,
-//     RlpDecodable,
-// )]
-// pub struct Rlp(pub Bytes);
-// impl TableEncode for Rlp {
-//     type Encoded = bytes::Bytes;
-//     fn encode(self) -> Self::Encoded {
-//         self.0
-//     }
-// }
-
-// impl TableDecode for Rlp {
-//     fn decode(b: &[u8]) -> Result<Self> {
-//         TableDecode::decode(b).map(Self)
-//     }
-// }
 
 macro_rules! table_key {
     ($name:ident($($t:ty),+)) => {
@@ -134,6 +136,38 @@ impl TableDecode for HeaderKey {
         }
         let (num, hash) = b.split_at(U64_LENGTH);
         Ok(Self(TableDecode::decode(num)?, TableDecode::decode(hash)?))
+    }
+}
+
+// (address, storage_key, block_number)
+table_key!(StorageHistKey(Address, H256, BlockNumber));
+
+impl TableEncode for StorageHistKey {
+    type Encoded = VariableVec<{ Self::SIZE }>;
+    fn encode(self) -> Self::Encoded {
+        let mut out = Self::Encoded::default();
+        out.try_extend_from_slice(&self.0.encode()).unwrap();
+        out.try_extend_from_slice(&self.1.encode()).unwrap();
+        out.try_extend_from_slice(&self.2.encode()).unwrap();
+        out
+    }
+}
+
+impl TableDecode for StorageHistKey {
+    fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() > Self::SIZE {
+            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
+        }
+        if b.len() < ADDRESS_LENGTH + KECCAK_LENGTH {
+            return Err(TooShort::<{ ADDRESS_LENGTH + KECCAK_LENGTH }> { got: b.len() }.into());
+        }
+        let (adr, rest) = b.split_at(ADDRESS_LENGTH);
+        let (key, shard_id) = rest.split_at(KECCAK_LENGTH);
+        Ok(Self(
+            TableDecode::decode(adr)?,
+            TableDecode::decode(key)?,
+            TableDecode::decode(shard_id)?,
+        ))
     }
 }
 
@@ -215,6 +249,26 @@ impl HashStorageKey {
             inc,
             ethers::utils::keccak256(key).into(),
         )
+    }
+}
+
+impl TableEncode for (Address, Account) {
+    type Encoded = Vec<u8>;
+    fn encode(self) -> Self::Encoded {
+        let mut out = Self::Encoded::default();
+        out.extend_from_slice(&self.0.encode());
+        out.append(&mut self.1.encode());
+        out
+    }
+}
+
+impl TableDecode for (Address, Account) {
+    fn decode(b: &[u8]) -> Result<Self> {
+        if b.len() < ADDRESS_LENGTH {
+            return Err(TooShort::<{ ADDRESS_LENGTH }> { got: b.len() }.into());
+        }
+        let (adr, acct) = b.split_at(ADDRESS_LENGTH);
+        Ok((TableDecode::decode(adr)?, TableDecode::decode(acct)?))
     }
 }
 

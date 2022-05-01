@@ -9,7 +9,7 @@ let path = Path::new(env!("ERIGON_CHAINDATA"));
 let env = Erigon::open_ro(path)?;
 let db = Erigon::begin(&env)?;
 
-let head_hash = db.read_head_block_hash()?;
+let head_hash = db.read_head_block_hash()?.unwrap();
 let head_num = db.read_header_number(head_hash)?;
 # Ok(())
 # }

@@ -217,6 +217,17 @@ where
     K: TransactionKind,
     T: Table<'tx>,
 {
+    /// Returns the (key, value) pair at the first key >= `key`
+    pub fn seek(&mut self, key: T::SeekKey) -> Result<Option<(T::Key, T::Value)>>
+    where
+        T::Key: TableDecode,
+    {
+        self.inner
+            .set_range::<Cow<_>, Cow<_>>(key.encode().as_ref())?
+            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
+            .transpose()
+    }
+
     /// Returns an iterator over (key, value) pairs beginning at start_key. If the table
     /// is dupsorted (contains duplicate items for each key), all of the duplicates
     /// at a given key will be returned before moving on to the next key.

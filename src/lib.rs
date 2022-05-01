@@ -19,18 +19,35 @@ mod tests {
     #[test]
     fn test() -> eyre::Result<()> {
         let path = Path::new(env!("ERIGON_CHAINDATA"));
-        let env = MdbxEnv::open_ro(path, 20, erigon::ENV_FLAGS)?;
-        let tx = env.begin_ro()?;
-        let reader = Erigon(tx);
-        let hash = reader.read_head_block_hash()?.unwrap();
-        dbg!(hash);
-        let num = reader.read_header_number(hash)?.unwrap();
-        dbg!(num);
-        let key = HeaderKey(num, hash);
-        let header = reader.read_header(key)?;
-        dbg!(header);
-        let body = reader.read_body_for_storage(key)?;
-        dbg!(body);
+        let env = Erigon::open_ro(path)?;
+        let db = Erigon::begin(&env)?;
+
+        let dst: Address = "0xa94f5374Fce5edBC8E2a8697C15331677e6EbF0B"
+                .parse()
+                .unwrap();
+        let contract: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2"
+                .parse()
+                .unwrap();
+        let res = db.read_account_hist(contract, 3.into())?;
+        dbg!(res);
+
+        let slot = H256::from_low_u64_be(1);
+        let res = db.read_storage_hist(contract, 1.into(), slot, 3.into())?;
+        dbg!(res);
+        let current = db.read_storage(contract, 1.into(), slot)?;
+        dbg!(current);
+
+
+        // let env = MdbxEnv::open_ro(path, 20, erigon::ENV_FLAGS)?;
+        // let tx = env.begin_ro()?;
+        // let reader = Erigon(tx);
+        // let hash = db.read_head_block_hash()?.unwrap();
+        // let num = db.read_header_number(hash)?.unwrap();
+        // let key = HeaderKey(num, hash);
+        // let header = reader.read_header(key)?;
+        // dbg!(header);
+        // let body = reader.read_body_for_storage(key)?;
+        // dbg!(body);
         // let header: erigon::models::BlockHeader = Decodable::decode(&mut &**rlp)?;
         // let header = dbg!(header);
         // let mut buf = vec![];
