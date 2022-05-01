@@ -8,7 +8,7 @@ pub mod tables;
 pub mod traits;
 
 use tables::TableHandle;
-use traits::{DbFlags, DbName, Mode, Table, TableDecode, TableEncode};
+use traits::{DbFlags, DbName, DupSort, Mode, Table, TableDecode, TableEncode};
 
 fn open_env<E: EnvironmentKind>(
     path: &Path,
@@ -22,6 +22,7 @@ fn open_env<E: EnvironmentKind>(
         .map_err(From::from)
 }
 
+#[derive(Debug)]
 pub struct MdbxEnv<M> {
     // Force NoWriteMap. MDBX_WRITEMAP mode maps data into memory with
     // write permission. This means stray writes through pointers can silently
@@ -96,6 +97,7 @@ impl EnvFlags {
     }
 }
 
+#[derive(Debug)]
 pub struct MdbxTx<'env, K: TransactionKind> {
     pub inner: mdbx::Transaction<'env, K, NoWriteMap>,
 }
@@ -120,6 +122,7 @@ impl<'env, K: TransactionKind> MdbxTx<'env, K> {
     pub fn new(inner: mdbx::Transaction<'env, K, NoWriteMap>) -> Self {
         Self { inner }
     }
+
     pub fn get<'tx, T, F>(
         &'tx self,
         db: TableHandle<'tx, T::Name, F>,
@@ -133,6 +136,17 @@ impl<'env, K: TransactionKind> MdbxTx<'env, K> {
             .get::<Cow<[u8]>>(db.as_ref(), key.encode().as_ref())?
             .map(|c| T::Value::decode(&c))
             .transpose()
+    }
+
+    pub fn cursor<'tx, T, F>(
+        &'tx self,
+        db: TableHandle<'tx, T::Name, F>,
+    ) -> Result<MdbxCursor<'tx, K, T>>
+    where
+        T: Table<'tx>,
+        F: DbFlags,
+    {
+        Ok(MdbxCursor::new(self.inner.cursor(db.as_ref())?))
     }
 }
 
@@ -150,5 +164,88 @@ impl<'env> MdbxTx<'env, RW> {
         self.inner
             .put(db.as_ref(), key.encode(), val.encode(), WriteFlags::UPSERT)
             .map_err(From::from)
+    }
+}
+
+pub struct MdbxCursor<'tx, K, T>
+where
+    K: TransactionKind,
+{
+    pub(crate) inner: mdbx::Cursor<'tx, K>,
+    _dbi: std::marker::PhantomData<T>,
+}
+impl<'tx, K, T> MdbxCursor<'tx, K, T>
+where
+    K: TransactionKind,
+{
+    pub fn new(inner: mdbx::Cursor<'tx, K>) -> Self {
+        Self {
+            inner,
+            _dbi: std::marker::PhantomData,
+        }
+    }
+}
+
+pub struct DupWalker<'tx, K, T>
+where
+    K: TransactionKind,
+    T: Table<'tx>,
+{
+    pub cur: MdbxCursor<'tx, K, T>,
+    pub first: Option<Result<T::Value>>,
+}
+
+impl<'tx, K, T> std::iter::Iterator for DupWalker<'tx, K, T>
+where
+    K: TransactionKind,
+    T: DupSort<'tx>,
+{
+    type Item = Result<T::Value>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let first = self.first.take();
+        if first.is_some() {
+            return first
+        }
+        self.cur
+            .inner
+            .next_dup::<Cow<_>, Cow<_>>()
+            .ok()?
+            .map(|(_, cow_val)| T::Value::decode(&cow_val))
+    }
+}
+
+impl<'tx, K, T> MdbxCursor<'tx, K, T>
+where
+    K: TransactionKind,
+    T: DupSort<'tx>,
+{
+    /// Finds the given key in the table, then the first duplicate entry at that
+    /// key with data >= subkey, and returns this value. It you want to find an exact
+    /// subkey in the dupsort "sub table", you need to check that the returned
+    /// value begins with your subkey
+    pub fn seek_both_range(
+        &mut self,
+        key: T::Key,
+        subkey: T::SeekBothKey,
+    ) -> Result<Option<T::Value>> {
+        self.inner
+            .get_both_range::<Cow<[u8]>>(key.encode().as_ref(), subkey.encode().as_ref())?
+            .map(|c| T::Value::decode(&c))
+            .transpose()
+    }
+
+    pub fn walk_dup(
+        mut self,
+        start_key: T::Key,
+    ) -> Result<impl Iterator<Item = Result<<T as Table<'tx>>::Value>>> {
+        let first = self
+            .inner
+            .set_key::<Cow<_>, Cow<_>>(start_key.encode().as_ref())?
+            .map(|(_, cow_val)| T::Value::decode(&cow_val));
+
+        Ok(DupWalker {
+            cur: self,
+            first,
+        })
     }
 }

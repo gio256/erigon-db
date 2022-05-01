@@ -521,7 +521,6 @@ impl TableEncode for Vec<Address> {
         for addr in self {
             v.extend_from_slice(&addr.encode());
         }
-
         v
     }
 }

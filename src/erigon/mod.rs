@@ -1,5 +1,8 @@
-use crate::kv::traits::{DefaultFlags, Mode, Table};
-use crate::kv::{tables::TableHandle, MdbxTx};
+use crate::kv::{
+    tables::TableHandle,
+    traits::{DefaultFlags, Mode, Table},
+    MdbxCursor, MdbxTx,
+};
 use ethereum_types::{Address, H256, H64, U256};
 use eyre::{eyre, Result};
 use fastrlp::{Decodable, Encodable};
@@ -10,7 +13,10 @@ use tables::*;
 pub mod models;
 pub mod tables;
 
-use models::{Account, BlockHeader, BlockNumber, BodyForStorage, HeaderKey, Incarnation, Rlp, StorageKey, Bytecode};
+use models::{
+    Account, BlockHeader, BlockNumber, BodyForStorage, Bytecode, HeaderKey, Incarnation, Rlp,
+    StorageKey,
+};
 
 /// Erigon wraps an MdbxTx and provides Erigon-specific access methods.
 pub struct Erigon<'env, K: TransactionKind>(pub MdbxTx<'env, K>);
@@ -22,6 +28,12 @@ impl<'env, K: Mode> Erigon<'env, K> {
         T: Table<'tx> + DefaultFlags,
     {
         self.0.get::<T, T::Flags>(self.0.open_db()?, key)
+    }
+    pub fn cursor<'tx, T>(&'tx self) -> Result<MdbxCursor<'tx, K, T>>
+    where
+        T: Table<'tx> + DefaultFlags,
+    {
+        self.0.cursor::<T, T::Flags>(self.0.open_db()?)
     }
 
     /// Returns the hash of the current canonical head header.
@@ -102,10 +114,27 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the value of the storage for account `who` indexed by `key`.
-    /// If the account or storage slot is not in the db, returns 0x0.
-    pub fn read_storage(&mut self, who: Address, inc: Incarnation, key: H256) -> Result<H256> {
-        let key = StorageKey::new(who, inc);
-        todo!()
+    pub fn read_storage(
+        &mut self,
+        who: Address,
+        inc: Incarnation,
+        key: H256,
+    ) -> Result<Option<U256>> {
+        let bucket = StorageKey::new(who, inc);
+        let mut cur = self.cursor::<Storage>()?;
+        cur.seek_both_range(bucket, key)
+            .map(|kv| kv.and_then(|(k, v)| if k == key { Some(v) } else { None }))
+    }
+
+    /// Returns an iterator over all of the storage (key, value) pairs for the
+    /// given address and account incarnation.
+    pub fn walk_storage(
+        &mut self,
+        who: Address,
+        inc: Incarnation,
+    ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
+        let start_key = StorageKey::new(who, inc);
+        self.cursor::<Storage>()?.walk_dup(start_key)
     }
 
     /// Returns the code associated with the given codehash.
@@ -120,7 +149,6 @@ impl<'env, K: Mode> Erigon<'env, K> {
     pub fn read_code_size(&mut self, codehash: H256) -> Result<usize> {
         Ok(self.read_code(codehash)?.len())
     }
-
 }
 
 impl<'env> Erigon<'env, mdbx::RW> {
