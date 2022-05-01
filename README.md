@@ -1,4 +1,4 @@
-Much of the code has been taken and modified from [Akula](https://github.com/akula-bft/akula) in order to enable its use with the stable rust toolchain.
+Much of the code has been taken from the [Akula](https://github.com/akula-bft/akula) Ethereum client in order to enable its use with the stable rust toolchain. In particular, it repurposes many of Akula's [`kv`](https://github.com/akula-bft/akula/blob/master/src/kv/mod.rs) utilities and abstractions for working with `libmdbx` and Ethereum data.
 
 ```rust
 # use erigon_db::Erigon;

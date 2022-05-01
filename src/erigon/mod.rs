@@ -291,18 +291,3 @@ impl<'env> Erigon<'env, mdbx::RW> {
         self.write::<BlockBody>(k, v)
     }
 }
-
-// pub fn stream_transactions<'tx, K>(cur: &mut MdbxCursor<'tx, K, BlockTransaction>, start_key: u64) -> impl Iterator<Item= Result<>> where K: TransactionKind, {
-//     todo!()
-// }
-// pub fn walk_storage<'tx, 'cur, K>(
-//     cur: &'cur mut MdbxCursor<'tx, K, Storage>,
-//     who: Address,
-//     inc: Incarnation,
-// ) -> Result<impl Iterator<Item = Result<(H256, U256)>> + 'cur>
-// where
-//     K: TransactionKind,
-// {
-//     let start_key = StorageKey::new(who, inc);
-//     cur.walk_dup(start_key)
-// }

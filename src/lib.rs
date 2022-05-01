@@ -36,30 +36,6 @@ mod tests {
 
         let hash = db.read_head_block_hash()?.unwrap();
         let num = db.read_header_number(hash)?.unwrap();
-
-        // let env = MdbxEnv::open_ro(path, 20, erigon::ENV_FLAGS)?;
-        // let tx = env.begin_ro()?;
-        // let reader = Erigon(tx);
-        // let hash = db.read_head_block_hash()?.unwrap();
-        // let num = db.read_header_number(hash)?.unwrap();
-        // let key = HeaderKey(num, hash);
-        // let header = reader.read_header(key)?;
-        // dbg!(header);
-        // let body = reader.read_body_for_storage(key)?;
-        // dbg!(body);
-        // let header: erigon::models::BlockHeader = Decodable::decode(&mut &**rlp)?;
-        // let header = dbg!(header);
-        // let mut buf = vec![];
-        // header.encode(&mut buf);
-        // assert_eq!(erigon::models::Rlp(buf.into()), rlp);
-        // let foo = dbg!(PlainPrefix::SIZE);
-        // let who: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2".parse()?;
-        // let pre = PlainPrefix(who, u64::MAX);
-        // dbg!(pre.clone());
-        // let enc = kv::traits::TableEncode::encode(pre.clone());
-        // dbg!(enc.clone());
-        // let dec: PlainPrefix = kv::traits::TableDecode::decode(&enc)?;
-        // dbg!(dec);
         Ok(())
     }
 }
