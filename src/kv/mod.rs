@@ -29,7 +29,8 @@ fn open_env<E: EnvironmentKind>(
 /// You cannot open a read-write transaction using a `MdbxEnv<RO>`, and you
 /// cannot get a `MdbxEnv<RW>` from a `MdbxEnv<RO>`. You can, however, move out
 /// of the struct and do whatever you want with the inner `mdbx::Environment`,
-/// safe or unsafe.
+/// safe or unsafe. You should only ever open a single mdbx environment from
+/// the same process.
 /// - The `mdbx::EnvironmentKind` is forced to `NoWriteMap`. MDBX_WRITEMAP
 /// mode maps data into memory with write permission. This means stray writes
 /// through pointers can silently corrupt the db. It's also slower when
@@ -122,7 +123,7 @@ impl EnvFlags {
 /// A wrapper around [`mdbx::Transaction`].
 #[derive(Debug)]
 pub struct MdbxTx<'env, K: TransactionKind> {
-    inner: mdbx::Transaction<'env, K, NoWriteMap>,
+    pub inner: mdbx::Transaction<'env, K, NoWriteMap>,
 }
 impl<'env, M> MdbxTx<'env, M>
 where
@@ -196,7 +197,7 @@ pub struct MdbxCursor<'tx, K, T>
 where
     K: TransactionKind,
 {
-    pub(crate) inner: mdbx::Cursor<'tx, K>,
+    pub inner: mdbx::Cursor<'tx, K>,
     _dbi: std::marker::PhantomData<T>,
 }
 impl<'tx, K, T> MdbxCursor<'tx, K, T>
@@ -214,6 +215,46 @@ where
 impl<'tx, K, T> MdbxCursor<'tx, K, T>
 where
     K: TransactionKind,
+    T: Table<'tx>,
+{
+    /// Returns an iterator over (key, value) pairs beginning at start_key. If the table
+    /// is dupsorted (contains duplicate items for each key), all of the duplicates
+    /// at a given key will be returned before moving on to the next key.
+    pub fn walk(
+        &mut self,
+        start_key: T::Key,
+    ) -> impl Iterator<Item = Result<(<T as Table<'tx>>::Key, <T as Table<'tx>>::Value)>> + '_
+    where
+        T::Key: TableDecode,
+    {
+        self.inner
+            .iter_from::<Cow<_>, Cow<_>>(&start_key.encode().as_ref())
+            .map(|res| {
+                let (k, v) = res?;
+                Ok((T::Key::decode(&k)?, T::Value::decode(&v)?))
+            })
+    }
+
+    /// Returns an iterator over values beginning at start_key, without attempting
+    /// to decode the returned keys (only the values). If the table is dupsorted
+    /// (contains duplicate items for each key), all of the duplicates at a
+    /// given key will be returned before moving on to the next key.
+    pub fn walk_values(
+        &mut self,
+        start_key: T::Key,
+    ) -> impl Iterator<Item = Result<<T as Table<'tx>>::Value>> + '_ {
+        self.inner
+            .iter_from::<Cow<_>, Cow<_>>(&start_key.encode().as_ref())
+            .map(|res| {
+                let (_, v) = res?;
+                T::Value::decode(&v)
+            })
+    }
+}
+
+impl<'tx, K, T> MdbxCursor<'tx, K, T>
+where
+    K: TransactionKind,
     T: DupSort<'tx>,
 {
     /// Finds the given key in the table, then the first duplicate entry at that
@@ -225,7 +266,7 @@ where
     /// to check that the returned value begins with your subkey. If it does not,
     /// then the cursor seeked past the requested subkey without a match, meaning
     /// the table does not contain a value that begins with the provided subkey.
-    pub fn seek_dup_range(&mut self, key: T::Key, subkey: T::Subkey) -> Result<Option<T::Value>> {
+    pub fn seek_dup(&mut self, key: T::Key, subkey: T::Subkey) -> Result<Option<T::Value>> {
         self.inner
             .get_both_range::<Cow<[u8]>>(key.encode().as_ref(), subkey.encode().as_ref())?
             .map(|c| T::Value::decode(&c))
@@ -249,7 +290,7 @@ where
     /// to decode the table key. Note that the value returned includes the
     /// subkey prefix, meaning you likely want to decode it into
     /// `(subkey, value_at_subkey)`.
-    pub fn next_dup_val(&mut self) -> Result<Option<T::Value>> {
+    pub fn next_dup_value(&mut self) -> Result<Option<T::Value>> {
         self.inner
             .next_dup::<Cow<_>, Cow<_>>()?
             .map(|(_, v)| T::Value::decode(&v))
@@ -265,17 +306,18 @@ where
     ) -> Result<impl Iterator<Item = Result<<T as Table<'tx>>::Value>>> {
         let first = self
             .inner
-            .set_key::<Cow<_>, Cow<_>>(start_key.encode().as_ref())?
-            .map(|(_, cow_val)| T::Value::decode(&cow_val));
+            .set::<Cow<_>>(start_key.encode().as_ref())?
+            .map(|cow_val| T::Value::decode(&cow_val));
 
         Ok(DupWalker { cur: self, first })
     }
 }
 
 /// An internal struct for turning a cursor to a dupsorted table into an iterator
-/// over values in that table. See [`Akula`] for a much more interesting approach
-/// using generators.
-/// [`akula`]: https://github.com/akula-bft/akula/blob/1800ac77b979d410bea5ff3bcd2617cb302d66fe/src/kv/mdbx.rs#L432
+/// over values in that table.
+///
+/// See [Akula](https://github.com/akula-bft/akula/blob/1800ac77b979d410bea5ff3bcd2617cb302d66fe/src/kv/mdbx.rs#L432)
+/// for a much more interesting approach using generators.
 struct DupWalker<'tx, K, T>
 where
     K: TransactionKind,
@@ -296,6 +338,6 @@ where
         if first.is_some() {
             return first;
         }
-        self.cur.next_dup_val().transpose()
+        self.cur.next_dup_value().transpose()
     }
 }

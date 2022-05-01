@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
 #![allow(unused_imports)]
 #![allow(unused)]
-pub mod kv;
 pub mod erigon;
+pub mod kv;
 pub use erigon::*;
 
 #[cfg(test)]
@@ -22,9 +22,9 @@ mod tests {
         let env = MdbxEnv::open_ro(path, 20, erigon::ENV_FLAGS)?;
         let tx = env.begin_ro()?;
         let reader = Erigon(tx);
-        let hash = reader.read_head_block_hash()?;
+        let hash = reader.read_head_block_hash()?.unwrap();
         dbg!(hash);
-        let num = reader.read_header_number(hash)?;
+        let num = reader.read_header_number(hash)?.unwrap();
         dbg!(num);
         let key = HeaderKey(num, hash);
         let header = reader.read_header(key)?;

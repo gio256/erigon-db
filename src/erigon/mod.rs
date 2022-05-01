@@ -1,7 +1,7 @@
 use crate::kv::{
     tables::TableHandle,
     traits::{DefaultFlags, Mode, Table},
-    MdbxCursor, MdbxTx, MdbxEnv, EnvFlags,
+    EnvFlags, MdbxCursor, MdbxEnv, MdbxTx,
 };
 use ethereum_types::{Address, H256, H64, U256};
 use eyre::{eyre, Result};
@@ -30,7 +30,7 @@ pub const ENV_FLAGS: EnvFlags = EnvFlags {
     liforeclaim: false,
 };
 
-/// Erigon wraps an MdbxTx and provides Erigon-specific access methods.
+/// Erigon wraps an `MdbxTx` and provides Erigon-specific access methods.
 pub struct Erigon<'env, K: TransactionKind>(pub MdbxTx<'env, K>);
 
 impl<'env> Erigon<'env, RO> {
@@ -47,6 +47,11 @@ impl<'env> Erigon<'env, RW> {
     }
     pub fn begin_rw(env: &'env MdbxEnv<RW>) -> Result<Self> {
         env.begin_rw().map(Self)
+    }
+}
+impl<'env, K: TransactionKind> Erigon<'env, K> {
+    pub fn new(inner: MdbxTx<'env, K>) -> Self {
+        Self(inner)
     }
 }
 
@@ -68,117 +73,110 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the hash of the current canonical head header.
-    pub fn read_head_header_hash(&self) -> Result<H256> {
-        self.read::<LastHeader>(LastHeader)?
-            .ok_or(eyre!("No value"))
+    pub fn read_head_header_hash(&self) -> Result<Option<H256>> {
+        self.read::<LastHeader>(LastHeader)
     }
 
     /// Returns the hash of the current canonical head block.
-    pub fn read_head_block_hash(&self) -> Result<H256> {
-        self.read::<LastBlock>(LastBlock)?.ok_or(eyre!("No value"))
+    pub fn read_head_block_hash(&self) -> Result<Option<H256>> {
+        self.read::<LastBlock>(LastBlock)
     }
 
     /// Returns the incarnation of the account when it was last deleted.
-    pub fn read_incarnation(&self, who: Address) -> Result<Incarnation> {
-        self.read::<IncarnationMap>(who)?.ok_or(eyre!("No value"))
+    pub fn read_incarnation(&self, who: Address) -> Result<Option<Incarnation>> {
+        self.read::<IncarnationMap>(who)
     }
 
     /// Returns the decoded account data as stored in the PlainState table.
-    pub fn read_account_data(&self, who: Address) -> Result<Account> {
-        self.read::<PlainState>(who)?.ok_or(eyre!("No value"))
+    pub fn read_account_data(&self, who: Address) -> Result<Option<Account>> {
+        self.read::<PlainState>(who)
     }
 
     /// Returns the number of the block containing the specified transaction.
-    pub fn read_transaction_block_number(&self, hash: H256) -> Result<U256> {
-        self.read::<BlockTransactionLookup>(hash)?
-            .ok_or(eyre!("No value"))
+    pub fn read_transaction_block_number(&self, hash: H256) -> Result<Option<U256>> {
+        self.read::<BlockTransactionLookup>(hash)
     }
 
     /// Returns the block header identified by the (block number, block hash) key
-    pub fn read_header(&self, key: HeaderKey) -> Result<BlockHeader> {
-        self.read::<Header>(key)?.ok_or(eyre!("No value"))
+    pub fn read_header(&self, key: HeaderKey) -> Result<Option<BlockHeader>> {
+        self.read::<Header>(key)
     }
 
     /// Returns the decoding of the body as stored in the BlockBody table
-    pub fn read_body_for_storage(&self, key: HeaderKey) -> Result<BodyForStorage> {
-        let mut body = self.read::<BlockBody>(key)?.ok_or(eyre!("No value"))?;
-
-        // Skip 1 system tx at the beginning of the block and 1 at the end
-        // https://github.com/ledgerwatch/erigon/blob/f56d4c5881822e70f65927ade76ef05bfacb1df4/core/rawdb/accessors_chain.go#L602-L605
-        body.base_tx_id += 1;
-        body.tx_amount = body.tx_amount.checked_sub(2).ok_or_else(|| {
-            eyre!(
-                "Block body has too few txs: {}. HeaderKey: {:?}",
-                body.tx_amount,
-                key,
-            )
-        })?;
-        Ok(body)
+    pub fn read_body_for_storage(&self, key: HeaderKey) -> Result<Option<BodyForStorage>> {
+        self.read::<BlockBody>(key)?
+            .map(|mut body| {
+                // Skip 1 system tx at the beginning of the block and 1 at the end
+                // https://github.com/ledgerwatch/erigon/blob/f56d4c5881822e70f65927ade76ef05bfacb1df4/core/rawdb/accessors_chain.go#L602-L605
+                // https://github.com/ledgerwatch/erigon-lib/blob/625c9f5385d209dc2abfadedf6e4b3914a26ed3e/kv/tables.go#L28
+                body.base_tx_id += 1;
+                body.tx_amount = body.tx_amount.checked_sub(2).ok_or_else(|| {
+                    eyre!(
+                        "Block body has too few txs: {}. HeaderKey: {:?}",
+                        body.tx_amount,
+                        key,
+                    )
+                })?;
+                Ok(body)
+            })
+            .transpose()
     }
 
     /// Returns the header number assigned to a hash.
-    pub fn read_header_number(&self, hash: H256) -> Result<BlockNumber> {
-        self.read::<HeaderNumber>(hash)?.ok_or(eyre!("No value"))
+    pub fn read_header_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
+        self.read::<HeaderNumber>(hash)
     }
 
-    /// Returns the number of the current canonical block header
-    pub fn read_head_block_number(&mut self) -> Result<BlockNumber> {
-        let hash = self.read_head_header_hash()?;
+    /// Returns the number of the current canonical block header.
+    pub fn read_head_block_number(&self) -> Result<Option<BlockNumber>> {
+        let hash = self.read_head_header_hash()?.ok_or(eyre!("No value"))?;
         self.read_header_number(hash)
     }
 
     /// Returns the signers of each transaction in the block.
-    pub fn read_senders(&mut self, key: HeaderKey) -> Result<Vec<Address>> {
-        self.read::<TxSender>(key)?.ok_or(eyre!("No value"))
+    pub fn read_senders(&self, key: HeaderKey) -> Result<Option<Vec<Address>>> {
+        self.read::<TxSender>(key)
     }
 
     /// Returns the hash assigned to a canonical block number.
-    pub fn read_canonical_hash(&mut self, num: BlockNumber) -> Result<H256> {
-        self.read::<CanonicalHeader>(num)?.ok_or(eyre!("No value"))
+    pub fn read_canonical_hash(&self, num: BlockNumber) -> Result<Option<H256>> {
+        self.read::<CanonicalHeader>(num)
     }
 
     /// Determines whether a header with the given hash is on the canonical chain.
-    pub fn is_canonical_hash(&mut self, hash: H256) -> Result<bool> {
-        let num = self.read_header_number(hash)?;
-        let canon = self.read_canonical_hash(num)?;
+    pub fn is_canonical_hash(&self, hash: H256) -> Result<bool> {
+        let num = self.read_header_number(hash)?.ok_or(eyre!("No value"))?;
+        let canon = self.read_canonical_hash(num)?.ok_or(eyre!("No value"))?;
         Ok(canon != Default::default() && canon == hash)
     }
 
     /// Returns the value of the storage for account `who` indexed by `key`.
-    pub fn read_storage(
-        &mut self,
-        who: Address,
-        inc: Incarnation,
-        key: H256,
-    ) -> Result<Option<U256>> {
+    pub fn read_storage(&self, who: Address, inc: Incarnation, key: H256) -> Result<Option<U256>> {
         let bucket = StorageKey::new(who, inc);
         let mut cur = self.cursor::<Storage>()?;
-        cur.seek_dup_range(bucket, key)
+        cur.seek_dup(bucket, key)
             .map(|kv| kv.and_then(|(k, v)| if k == key { Some(v) } else { None }))
     }
 
-    /// Returns an iterator over all of the storage (key, value) pairs for the
-    /// given address and account incarnation.
-    pub fn walk_storage(
-        &mut self,
-        who: Address,
-        inc: Incarnation,
-    ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
-        let start_key = StorageKey::new(who, inc);
-        self.cursor::<Storage>()?.walk_dup(start_key)
-    }
+    // /// Returns an iterator over all of the storage (key, value) pairs for the
+    // /// given address and account incarnation.
+    // pub fn walk_storage(
+    //     &self,
+    //     who: Address,
+    //     inc: Incarnation,
+    // ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
+    //     let start_key = StorageKey::new(who, inc);
+    //     self.cursor::<Storage>()?.walk_dup(start_key)
+    // }
+
+    // pub fn stream_transactions(&)
 
     /// Returns the code associated with the given codehash.
-    pub fn read_code(&mut self, codehash: H256) -> Result<Bytecode> {
+    pub fn read_code(&self, codehash: H256) -> Result<Option<Bytecode>> {
         if codehash == models::EMPTY_HASH {
             return Ok(Default::default());
         }
-        self.read::<Code>(codehash)?.ok_or(eyre!("No value"))
-    }
-
-    /// Returns the length of the code associated with the given codehash.
-    pub fn read_code_size(&mut self, codehash: H256) -> Result<usize> {
-        Ok(self.read_code(codehash)?.len())
+        self.read::<Code>(codehash)
     }
 }
 
@@ -216,3 +214,11 @@ impl<'env> Erigon<'env, mdbx::RW> {
         self.write::<BlockBody>(k, v)
     }
 }
+
+// pub fn stream_transactions<'tx, K>(cur: &mut MdbxCursor<'tx, K, BlockTransaction>, start_key: u64) -> impl Iterator<Item= Result<>> where K: TransactionKind, {
+//     todo!()
+// }
+// pub fn walk_storage<'tx, K>(cur: &mut MdbxCursor<'tx, K, Storage>, who: Address, inc: Incarnation) -> Result<impl Iterator<Item=Result<(H256, U256)>>> where K: TransactionKind {
+//     let start_key = StorageKey::new(who, inc);
+//     cur.walk_dup(start_key)
+// }
