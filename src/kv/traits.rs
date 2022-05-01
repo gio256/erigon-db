@@ -21,7 +21,7 @@ pub trait Table<'tx>: Send + Sync + Debug + 'static {
 }
 
 pub trait DupSort<'tx>: Table<'tx> {
-    type SeekBothKey: TableObject;
+    type Subkey: TableObject;
 }
 
 pub trait DbName {

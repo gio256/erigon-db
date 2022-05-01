@@ -90,13 +90,13 @@ macro_rules! table {
 }
 #[macro_export]
 macro_rules! dupsort_table {
-    ($name:ident => $key:ty => $value:ty, SeekBothKey = $seek_both:ty) => {
+    ($name:ident => $key:ty => $value:ty, Subkey = $subkey:ty) => {
         $crate::table_without_flags!($name => $key => $value);
         impl $crate::kv::traits::DefaultFlags for $name {
             type Flags = $crate::kv::tables::DupSortFlags;
         }
         impl crate::kv::traits::DupSort<'_> for $name {
-            type SeekBothKey = $seek_both;
+            type Subkey = $subkey;
         }
     };
 }

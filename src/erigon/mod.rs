@@ -122,7 +122,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
     ) -> Result<Option<U256>> {
         let bucket = StorageKey::new(who, inc);
         let mut cur = self.cursor::<Storage>()?;
-        cur.seek_both_range(bucket, key)
+        cur.seek_dup_range(bucket, key)
             .map(|kv| kv.and_then(|(k, v)| if k == key { Some(v) } else { None }))
     }
 

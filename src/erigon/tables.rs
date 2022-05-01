@@ -54,9 +54,9 @@ table!(Code => H256 => Bytecode);
 table!(ContractCode => ContractCodeKey => H256);
 
 // block number => address | encoded account
-// dupsort_table!(AccountChangeSet => u64 => (Address, Account), SeekBothKey = Address);
+// dupsort_table!(AccountChangeSet => u64 => (Address, Account), Subkey = Address);
 // block number | address | incarnation => plain_storage_key | value
-dupsort_table!(StorageChangeSet => (u64, StorageKey) => (H256, H256), SeekBothKey = H256);
+dupsort_table!(StorageChangeSet => (u64, StorageKey) => (H256, H256), Subkey = H256);
 
 // Manually implement storage table because it overlaps with PlainState
 #[derive(Debug, Default, Clone, Copy)]
@@ -71,7 +71,7 @@ impl DbName for Storage {
     const NAME: &'static str = "PlainState";
 }
 impl crate::kv::traits::DupSort<'_> for Storage {
-    type SeekBothKey = H256;
+    type Subkey = H256;
 }
 impl crate::kv::traits::DefaultFlags for Storage {
     type Flags = crate::kv::tables::DupSortFlags;

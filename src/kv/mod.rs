@@ -22,11 +22,18 @@ fn open_env<E: EnvironmentKind>(
         .map_err(From::from)
 }
 
+/// A wrapper around [`mdbx::Environment`]. 
+///
+/// We use this wrapper to make a few alterations on the default behavior:
+/// - The mode the environment is opened in becomes part of the type signature.
+/// You cannot open a read-write transaction using a `MdbxEnv<RO>`, and you
+/// cannot get a `MdbxEnv<RW>` from a `MdbxEnv<RO>`.
+/// - The `mdbx::EnvironmentKind` is forced to `NoWriteMap`. MDBX_WRITEMAP
+/// mode maps data into memory with write permission. This means stray writes
+/// through pointers can silently corrupt the db. It's also slower when
+/// db size > RAM, so we ignore it.
 #[derive(Debug)]
 pub struct MdbxEnv<M> {
-    // Force NoWriteMap. MDBX_WRITEMAP mode maps data into memory with
-    // write permission. This means stray writes through pointers can silently
-    // corrupt the db. It's also slower when db size > RAM, so we ignore it
     inner: mdbx::Environment<NoWriteMap>,
     _mode: std::marker::PhantomData<M>,
 }
@@ -34,7 +41,7 @@ impl<M> MdbxEnv<M> {
     pub fn inner(&self) -> &mdbx::Environment<NoWriteMap> {
         &self.inner
     }
-    /// Create a read-only mdbx transaction
+    /// Create a read-only mdbx transaction.
     pub fn begin_ro(&self) -> Result<MdbxTx<'_, RO>> {
         Ok(MdbxTx::new(self.inner.begin_ro_txn()?))
     }
@@ -67,22 +74,35 @@ impl MdbxEnv<RW> {
     /// Create a read-write mdbx transaction. Blocks if another rw transaction is open.
     pub fn begin_rw(&self) -> Result<MdbxTx<'_, RW>> {
         Ok(MdbxTx::new(self.inner.begin_rw_txn()?))
-        // Ok(self.inner().begin_rw_txn()?)
     }
 }
 
-/// Holds all of mdbx::EnvironmentFlags except the `mode` field.
+/// Holds all [`mdbx::EnvironmentFlags`] except the `mode` field.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EnvFlags {
-    pub no_sub_dir: bool,
-    pub exclusive: bool,
-    pub accede: bool,
+    /// Disable readahead. Improves random read performance when db size > RAM.
+    /// By default, mdbx will dynamically determine whether to disable readahead.
     pub no_rdahead: bool,
-    pub no_meminit: bool,
+    /// Attempt to [coalesce](https://en.wikipedia.org/wiki/Coalescing_(computer_science)) while garbage collecting.
     pub coalesce: bool,
+    /// If the environment is already in use by another process with unknown flags,
+    /// by default an MDBX_INCOMPATIBLE error will be thrown. If `accede` is set,
+    /// the requested table will instead be opened with the existing flags.
+    pub accede: bool,
+    /// Treat the given path as the main data file rather than creating data and
+    /// lock files under a subdirectory.
+    pub no_sub_dir: bool,
+    /// Attempt to take an exclusive lock on the environment. If another process
+    /// is already using the environment, returns MDBX_BUSY.
+    pub exclusive: bool,
+    /// If enabled, don't initialize freshly malloc'd pages with zeroes. This can
+    /// result in persisting garbage data.
+    pub no_meminit: bool,
+    /// Replace the default FIFO garbage collection policy with LIFO.
     pub liforeclaim: bool,
 }
 impl EnvFlags {
+    /// Creates an [`mdbx::EnvironmentFlags`] struct with the requested mode.
     pub fn with_mode(self, mode: mdbx::Mode) -> mdbx::EnvironmentFlags {
         mdbx::EnvironmentFlags {
             mode,
@@ -97,9 +117,10 @@ impl EnvFlags {
     }
 }
 
+/// A wrapper around [`mdbx::Transaction`].
 #[derive(Debug)]
 pub struct MdbxTx<'env, K: TransactionKind> {
-    pub inner: mdbx::Transaction<'env, K, NoWriteMap>,
+    inner: mdbx::Transaction<'env, K, NoWriteMap>,
 }
 impl<'env, M> MdbxTx<'env, M>
 where
@@ -167,6 +188,8 @@ impl<'env> MdbxTx<'env, RW> {
     }
 }
 
+/// A wrapper around [`mdbx::Cursor`].
+#[derive(Debug)]
 pub struct MdbxCursor<'tx, K, T>
 where
     K: TransactionKind,
@@ -186,7 +209,72 @@ where
     }
 }
 
-pub struct DupWalker<'tx, K, T>
+impl<'tx, K, T> MdbxCursor<'tx, K, T>
+where
+    K: TransactionKind,
+    T: DupSort<'tx>,
+{
+    /// Finds the given key in the table, then the first duplicate entry at that
+    /// key with data >= subkey, and returns this value. Note that the value
+    /// returned includes the subkey prefix, meaning you likely want to decode
+    /// it into `(subkey, value_at_subkey)`.
+    ///
+    /// If you want to find an exact subkey in the dupsort "sub table", you need
+    /// to check that the returned value begins with your subkey. If it does not,
+    /// then the cursor seeked past the requested subkey without a match, meaning
+    /// the table does not contain a value that begins with the provided subkey.
+    pub fn seek_dup_range(&mut self, key: T::Key, subkey: T::Subkey) -> Result<Option<T::Value>> {
+        self.inner
+            .get_both_range::<Cow<[u8]>>(key.encode().as_ref(), subkey.encode().as_ref())?
+            .map(|c| T::Value::decode(&c))
+            .transpose()
+    }
+
+    /// Returns the current key and the next duplicate value at that key. Note
+    /// that the value returned includes the subkey prefix, meaning you likely
+    /// want to decode it into `(subkey, value_at_subkey)`.
+    pub fn next_dup(&mut self) -> Result<Option<(T::Key, T::Value)>>
+    where
+        T::Key: TableDecode,
+    {
+        self.inner
+            .next_dup::<Cow<_>, Cow<_>>()?
+            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
+            .transpose()
+    }
+
+    /// Returns the next duplicate value at the current key, without attempting
+    /// to decode the table key. Note that the value returned includes the
+    /// subkey prefix, meaning you likely want to decode it into
+    /// `(subkey, value_at_subkey)`.
+    pub fn next_dup_val(&mut self) -> Result<Option<T::Value>> {
+        self.inner
+            .next_dup::<Cow<_>, Cow<_>>()?
+            .map(|(_, v)| T::Value::decode(&v))
+            .transpose()
+    }
+
+    /// Returns an iterator over duplicate values for the given key. Note that
+    /// the values returned include the subkey prefix, meaning you likely want
+    /// to decode them into `(subkey, value_at_subkey)`.
+    pub fn walk_dup(
+        mut self,
+        start_key: T::Key,
+    ) -> Result<impl Iterator<Item = Result<<T as Table<'tx>>::Value>>> {
+        let first = self
+            .inner
+            .set_key::<Cow<_>, Cow<_>>(start_key.encode().as_ref())?
+            .map(|(_, cow_val)| T::Value::decode(&cow_val));
+
+        Ok(DupWalker { cur: self, first })
+    }
+}
+
+/// An internal struct for turning a cursor to a dupsorted table into an iterator
+/// over values in that table. See [`Akula`] for a much more interesting approach
+/// using generators.
+/// [`akula`]: https://github.com/akula-bft/akula/blob/1800ac77b979d410bea5ff3bcd2617cb302d66fe/src/kv/mdbx.rs#L432
+struct DupWalker<'tx, K, T>
 where
     K: TransactionKind,
     T: Table<'tx>,
@@ -204,48 +292,8 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let first = self.first.take();
         if first.is_some() {
-            return first
+            return first;
         }
-        self.cur
-            .inner
-            .next_dup::<Cow<_>, Cow<_>>()
-            .ok()?
-            .map(|(_, cow_val)| T::Value::decode(&cow_val))
-    }
-}
-
-impl<'tx, K, T> MdbxCursor<'tx, K, T>
-where
-    K: TransactionKind,
-    T: DupSort<'tx>,
-{
-    /// Finds the given key in the table, then the first duplicate entry at that
-    /// key with data >= subkey, and returns this value. It you want to find an exact
-    /// subkey in the dupsort "sub table", you need to check that the returned
-    /// value begins with your subkey
-    pub fn seek_both_range(
-        &mut self,
-        key: T::Key,
-        subkey: T::SeekBothKey,
-    ) -> Result<Option<T::Value>> {
-        self.inner
-            .get_both_range::<Cow<[u8]>>(key.encode().as_ref(), subkey.encode().as_ref())?
-            .map(|c| T::Value::decode(&c))
-            .transpose()
-    }
-
-    pub fn walk_dup(
-        mut self,
-        start_key: T::Key,
-    ) -> Result<impl Iterator<Item = Result<<T as Table<'tx>>::Value>>> {
-        let first = self
-            .inner
-            .set_key::<Cow<_>, Cow<_>>(start_key.encode().as_ref())?
-            .map(|(_, cow_val)| T::Value::decode(&cow_val));
-
-        Ok(DupWalker {
-            cur: self,
-            first,
-        })
+        self.cur.next_dup_val().transpose()
     }
 }
