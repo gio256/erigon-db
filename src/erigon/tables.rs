@@ -4,10 +4,9 @@ use crate::{
     kv::{tables::TableHandle, traits::*, EnvFlags},
     table,
 };
-use croaring::Treemap;
-use roaring::RoaringTreemap;
 use ethereum_types::{Address, H256, U256};
 use mdbx::DatabaseFlags;
+use roaring::RoaringTreemap;
 
 // The latest header and latest block are stored in their own tables, addressed
 // by a dummy key ("LastHeader" and "LastBlock", respectively). We encode the
@@ -35,7 +34,6 @@ table!(LastHeader               => LastHeader   => H256);
 table!(LastBlock                => LastBlock    => H256);
 table!(IncarnationMap           => Address      => Incarnation);
 table!(BlockTransactionLookup   => H256         => U256);
-//TODO: PlainState dup sorts in reverse?
 table!(PlainState               => Address      => Account);
 table!(HeaderNumber             => H256         => BlockNumber);
 table!(Header                   => HeaderKey    => BlockHeader, SeekKey = BlockNumber);
@@ -44,30 +42,22 @@ table!(PlainCodeHash            => PlainCodeKey => H256);
 table!(TxSender                 => HeaderKey    => Vec<Address>);
 // block number => header hash
 table!(CanonicalHeader          => BlockNumber  => H256);
+// Erigon docs refer to a shard_id for AccountHistory and StorageHistory, but this
+// appears just be the block number
+// Erigon also calls AccountHistory AccountsHistory (with an 's') in most places
+table!(AccountHistory => (Address, BlockNumber) => RoaringTreemap);
+dupsort_table!(AccountChangeSet => BlockNumber => (Address, Account), Subkey = Address);
+// block number | address | incarnation => storage_slot | value
+dupsort_table!(StorageChangeSet => (BlockNumber, StorageKey) => (H256, U256), Subkey = H256);
+table!(StorageHistory => StorageHistKey => RoaringTreemap);
 
 // keccak(address) => Account
 table!(HashedAccount => H256 => Account);
 // keccak(address) | incarnation | keccak(storage_key) => storage value
 table!(HashedStorage => HashStorageKey => H256);
-// table!(AccountsHistory);
-// table!(StorageHistory);
 table!(Code => H256 => Bytecode);
 // keccak256(address) | incarnation => code hash
 table!(ContractCode => ContractCodeKey => H256);
-
-// block number => address | encoded account
-// dupsort_table!(AccountChangeSet => u64 => (Address, Account), Subkey = Address);
-
-// Erigon docs refer to a shard_id for AccountHistory and StorageHistory, but this
-// appears to be the blocknumber in reality.
-// Erigon also calls AccountHistory AccountsHistory (with an 's') in most places
-table!(AccountHistory => (Address, BlockNumber) => RoaringTreemap);
-dupsort_table!(AccountChangeSet => BlockNumber => (Address, Account), Subkey = Address);
-// block number | address | incarnation => plain_storage_key | value
-dupsort_table!(StorageChangeSet => (BlockNumber, StorageKey) => (H256, U256), Subkey = H256);
-table!(StorageHistory => StorageHistKey => RoaringTreemap);
-// storage_index_chunk_key = (address, storage_key, block_num)
-// seek storage history cursor to index_chunk_key
 
 // Manually implement the storage table because it overlaps with PlainState
 // (that is, there are two things stored in the table with different key encodings,

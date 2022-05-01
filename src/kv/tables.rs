@@ -4,6 +4,7 @@ use derive_more::{Deref, DerefMut};
 use ethereum_types::{Address, H256, U256};
 use eyre::{eyre, Result};
 use mdbx::{DatabaseFlags, NoWriteMap, TransactionKind};
+use roaring::RoaringTreemap;
 use std::{
     convert::AsRef,
     fmt::{Debug, Display},
@@ -319,6 +320,20 @@ where
             A::decode(&v[..A_LEN]).unwrap(),
             B::decode(&v[A_LEN..]).unwrap(),
         ))
+    }
+}
+
+impl TableEncode for RoaringTreemap {
+    type Encoded = Vec<u8>;
+    fn encode(mut self) -> Self::Encoded {
+        let mut buf = Vec::with_capacity(self.serialized_size());
+        self.serialize_into(&mut buf).unwrap();
+        buf
+    }
+}
+impl TableDecode for RoaringTreemap {
+    fn decode(b: &[u8]) -> Result<Self> {
+        Ok(RoaringTreemap::deserialize_from(b)?)
     }
 }
 

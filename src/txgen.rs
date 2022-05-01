@@ -1,6 +1,6 @@
 use crate::k256::ecdsa::SigningKey;
-use eyre::{eyre};
 use ethers::{prelude::*, solc::Solc, utils::format_ether};
+use eyre::eyre;
 
 // Temporary script used for seeding test data
 #[tokio::main]
@@ -55,7 +55,18 @@ async fn main() {
     //first deployed contract: 0x0d4c6c6605a729a379216c93e919711a081beba2
     println!("Store address: {:?}", receipt.contract_address.unwrap());
 
+    //first deployed contract
+    let contract: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2"
+        .parse()
+        .unwrap();
+
     //dec slot
-    let tx = TransactionRequest::new().to(receipt.contract_address.unwrap());
-    signer.send_transaction(tx, None).await.unwrap().await.unwrap().unwrap();
+    let tx = TransactionRequest::new().to(contract);
+    signer
+        .send_transaction(tx, None)
+        .await
+        .unwrap()
+        .await
+        .unwrap()
+        .unwrap();
 }

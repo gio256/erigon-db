@@ -23,20 +23,19 @@ mod tests {
         let db = Erigon::begin(&env)?;
 
         let dst: Address = "0xa94f5374Fce5edBC8E2a8697C15331677e6EbF0B"
-                .parse()
-                .unwrap();
+            .parse()
+            .unwrap();
         let contract: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2"
-                .parse()
-                .unwrap();
+            .parse()
+            .unwrap();
         let res = db.read_account_hist(contract, 3.into())?;
-        dbg!(res);
 
         let slot = H256::from_low_u64_be(1);
         let res = db.read_storage_hist(contract, 1.into(), slot, 3.into())?;
-        dbg!(res);
         let current = db.read_storage(contract, 1.into(), slot)?;
-        dbg!(current);
 
+        let hash = db.read_head_block_hash()?.unwrap();
+        let num = db.read_header_number(hash)?.unwrap();
 
         // let env = MdbxEnv::open_ro(path, 20, erigon::ENV_FLAGS)?;
         // let tx = env.begin_ro()?;

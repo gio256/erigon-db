@@ -12,10 +12,11 @@ use tables::*;
 
 pub mod models;
 pub mod tables;
+mod utils;
 
 use models::{
-    Account, BlockHeader, BlockNumber, BodyForStorage, Bytecode, HeaderKey, Incarnation, Rlp, PlainCodeKey,
-    StorageHistKey, StorageKey,
+    Account, BlockHeader, BlockNumber, BodyForStorage, Bytecode, HeaderKey, Incarnation,
+    PlainCodeKey, Rlp, StorageHistKey, StorageKey,
 };
 
 pub const NUM_TABLES: usize = 50;
@@ -150,12 +151,12 @@ impl<'env, K: Mode> Erigon<'env, K> {
         Ok(canon != Default::default() && canon == hash)
     }
 
-    /// Returns the value of the storage for account `adr` indexed by `key`.
-    pub fn read_storage(&self, adr: Address, inc: Incarnation, key: H256) -> Result<Option<U256>> {
+    /// Returns the value of the storage for account `adr` indexed by `slot`.
+    pub fn read_storage(&self, adr: Address, inc: Incarnation, slot: H256) -> Result<Option<U256>> {
         let bucket = StorageKey::new(adr, inc);
         let mut cur = self.cursor::<Storage>()?;
-        cur.seek_dup(bucket, key)
-            .map(|kv| kv.and_then(|(k, v)| if k == key { Some(v) } else { None }))
+        cur.seek_dup(bucket, slot)
+            .map(|kv| kv.and_then(|(k, v)| if k == slot { Some(v) } else { None }))
     }
 
     /// Returns an iterator over all of the storage (key, value) pairs for the
@@ -183,48 +184,78 @@ impl<'env, K: Mode> Erigon<'env, K> {
         self.read::<PlainCodeHash>(key)
     }
 
-    // (address, block_num) => bitmap
-    // from bitmap we extract the smallest block >= block_num where the account changed
+    // The `AccountChangeSet` table at block `N` stores the state of all accounts
+    // changed in block `N` *before* block `N` changed them.
+    //
+    // The state of an account *after* the most recent change is always stored in the `PlainState` table.
+    //
+    // If Account A was changed in block 5 and again in block 25, the state of A for any
+    // block `[5, 25)` is stored in the `AccountChangeSet` table addressed by the
+    // block number 25. If we want to find the state of account `A` at block `B`,
+    // we first use the `AccountHistory` table to figure out which block to look for
+    // in the `AccountChangeSet` table. That is, we look for the smallest
+    // block >= `B` in which account `A` was changed, then we lookup the state
+    // of account `A` immediately before that change in the `AccountChangeSet` table.
+    //
+    // The `AccountHistory` table stores a roaring bitmap of the block numbers
+    // in which account `A` was changed. We search the bitmap for the smallest
+    // block number it contains which is `>= B`, then we read the state of account
+    // `A` at this block from the `AccountChangeSet` table.
+    //
+    // The confusing thing is, the block number in `AccountHistory` seems to
+    // be basically unused. For account `A`, every time a change is made, the
+    // bitmap stored at key `(A, u64::MAX)` is updated. Presumably this is used to
+    // grow the bitmap, and that's why akula and erigon both do some crazy mapping
+    // over the bitmap tables
+    //
+    // Notes:
+    // - `AccountHistory` and `StorageHistory` are written [here](https://github.com/ledgerwatch/erigon/blob/f9d7cb5ca9e8a135a76ddcb6fa4ee526ea383554/core/state/db_state_writer.go#L179).
+    // - `GetAsOf()` Erigon implementation [here](https://github.com/ledgerwatch/erigon/blob/f9d7cb5ca9e8a135a76ddcb6fa4ee526ea383554/core/state/history.go#L19).
+    //
+    /// Returns the state of account `adr` at the given block number.
     pub fn read_account_hist(&self, adr: Address, block: BlockNumber) -> Result<Option<Account>> {
         let mut hist_cur = self.cursor::<AccountHistory>()?;
         let mut cs_cur = self.cursor::<AccountChangeSet>()?;
-        // The value from AccountHistory at the first key >= block.
         let (_, bitmap) = hist_cur.seek((adr, block))?.ok_or(eyre!("No value"))?;
-        let cs_block = BlockNumber(find(bitmap, *block));
-        // // look for cs_block, addresss
+        let cs_block = BlockNumber(utils::find_gte(bitmap, *block));
         if let Some((k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
             if k == adr {
+                // recover the codehash
                 if acct.incarnation > 0 && acct.codehash == Default::default() {
-                    acct.codehash = self.read_codehash(adr, acct.incarnation)?.ok_or(eyre!("No value"))?
+                    acct.codehash = self
+                        .read_codehash(adr, acct.incarnation)?
+                        .ok_or(eyre!("No value"))?
                 }
-                return Ok(Some(acct))
+                return Ok(Some(acct));
             }
         }
         Ok(None)
     }
 
-    pub fn read_storage_hist(&self, adr: Address, inc: Incarnation, slot: H256, block: BlockNumber) -> Result<Option<U256>> {
+    /// Returns the value of an address's storage at the given block number. Returns `None` if the state
+    /// is not found in history (e.g., if it's in the PlainState table instead).
+    pub fn read_storage_hist(
+        &self,
+        adr: Address,
+        inc: Incarnation,
+        slot: H256,
+        block: BlockNumber,
+    ) -> Result<Option<U256>> {
         let mut hist_cur = self.cursor::<StorageHistory>()?;
         let mut cs_cur = self.cursor::<StorageChangeSet>()?;
-        let (_, bitmap) = hist_cur.seek(StorageHistKey(adr, slot, block))?.ok_or(eyre!("No value"))?;
-        let cs_block = BlockNumber(find(bitmap, *block));
+        let (_, bitmap) = hist_cur
+            .seek(StorageHistKey(adr, slot, block))?
+            .ok_or(eyre!("No value"))?;
+        let cs_block = BlockNumber(utils::find_gte(bitmap, *block));
         let cs_key = (cs_block, StorageKey::new(adr, inc));
         if let Some((k, v)) = cs_cur.seek_dup(cs_key, slot)? {
             if k == slot {
-                return Ok(Some(v))
+                return Ok(Some(v));
             }
         }
         Ok(None)
     }
 }
-use roaring::RoaringTreemap;
-fn find(map: RoaringTreemap, n: u64) -> u64 {
-    let rank = map.rank(n.saturating_sub(1));
-    map.select(rank).unwrap()
-}
-// fn read_hist<'tx, K, TH, TC>(hist_cur: &mut MdbxCursor<'tx, K, TH>, changeset_cur: &mut MdbxCursor<'tx, K, TC>) where K: TransactionKind {
-
-// }
 
 impl<'env> Erigon<'env, mdbx::RW> {
     /// Opens and writes to the db table with the table's default flags.

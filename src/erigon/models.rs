@@ -6,8 +6,6 @@ use fastrlp::{
     BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpMaxEncodedLen,
 };
-// use fastrlp::*;
-use croaring::{treemap::NativeSerializer, Treemap};
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
@@ -15,36 +13,6 @@ use crate::kv::{
     tables::{TooLong, TooShort, VariableVec},
     traits::{TableDecode, TableEncode},
 };
-
-impl TableEncode for Treemap {
-    type Encoded = Vec<u8>;
-    fn encode(mut self) -> Self::Encoded {
-        self.run_optimize();
-        self.serialize().unwrap()
-    }
-}
-impl TableDecode for Treemap {
-    fn decode(b: &[u8]) -> Result<Self> {
-        Ok(Treemap::deserialize(b)?)
-    }
-}
-
-use roaring::RoaringTreemap;
-impl TableEncode for RoaringTreemap {
-    type Encoded = Vec<u8>;
-    fn encode(mut self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(self.serialized_size());
-        self.serialize_into(&mut buf).unwrap();
-        buf
-    }
-}
-impl TableDecode for RoaringTreemap {
-    fn decode(b: &[u8]) -> Result<Self> {
-        Ok(RoaringTreemap::deserialize_from(b)?)
-    }
-}
-
-
 
 pub const KECCAK_LENGTH: usize = H256::len_bytes();
 pub const ADDRESS_LENGTH: usize = Address::len_bytes();
