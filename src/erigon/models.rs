@@ -9,10 +9,10 @@ use fastrlp::{
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::kv::{
+use crate::{erigon::utils, kv::{
     tables::{TooLong, TooShort, VariableVec},
     traits::{TableDecode, TableEncode},
-};
+}};
 
 pub const KECCAK_LENGTH: usize = H256::len_bytes();
 pub const ADDRESS_LENGTH: usize = Address::len_bytes();
@@ -175,7 +175,7 @@ table_key!(ContractCodeKey(H256, Incarnation));
 
 impl ContractCodeKey {
     fn new(who: Address, inc: Incarnation) -> Self {
-        Self(ethers::utils::keccak256(who).into(), inc)
+        Self(utils::keccak256(who).into(), inc)
     }
 }
 
@@ -219,9 +219,9 @@ impl TableEncode for HashStorageKey {
 impl HashStorageKey {
     pub fn new(who: Address, inc: Incarnation, key: H256) -> Self {
         Self(
-            ethers::utils::keccak256(who).into(),
+            utils::keccak256(who).into(),
             inc,
-            ethers::utils::keccak256(key).into(),
+            utils::keccak256(key).into(),
         )
     }
 }

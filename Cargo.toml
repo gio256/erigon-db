@@ -12,16 +12,15 @@ path = "src/lib.rs"
 [[bin]]
 name = "txgen"
 path = "src/txgen.rs"
+required-features = ["txgen"]
 
 [dependencies]
 arrayvec = "0.7"
 arrayref = "0.3"
-bytes = "1"
-croaring = { git = "https://github.com/saulius/croaring-rs" }
+bytes = { version = "1", features = ["serde"] }
 roaring = "0.9"
 derive_more = "0.99"
 eyre = "0.6.5"
-ethers = { git = "https://github.com/gakonst/ethers-rs" }
 ethereum-types = { version = "0.13", features = ["codec"] }
 hex-literal = "0.3"
 mdbx = { package = "libmdbx", version = "0.1" }
@@ -29,12 +28,17 @@ parity-scale-codec = { version = "3", features = ["bytes"] }
 fastrlp = { version = "0.1", features = [
     "derive",
     "ethereum-types",
-    "ethnum",
     "std",
 ] }
-serde = "1"
+serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.5", features = ["macros", "rt-multi-thread"] }
+tiny-keccak = "2.0"
+
+tokio = { version = "1.5", features = ["macros", "rt-multi-thread"], optional = true }
+ethers = { git = "https://github.com/gakonst/ethers-rs", optional = true }
+
+[features]
+txgen = ["tokio", "ethers"]
 
 [patch.crates-io]
 libmdbx = { git = "https://github.com/gio256/libmdbx-rs", branch = "develop" }
