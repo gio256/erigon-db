@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![doc = include_str!("../mdbx.md")]
 #![allow(unused_imports)]
 #![allow(unused)]
 pub mod erigon;

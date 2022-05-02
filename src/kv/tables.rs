@@ -16,7 +16,7 @@ use crate::kv::traits::*;
 const KECCAK_LENGTH: usize = 32;
 const ADDRESS_LENGTH: usize = 20;
 
-pub struct TableHandle<'tx, Dbi, Flags: DbFlags> {
+pub struct TableHandle<'tx, Dbi, Flags> {
     inner: mdbx::Database<'tx>,
     _dbi: std::marker::PhantomData<(Dbi, Flags)>,
 }

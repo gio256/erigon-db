@@ -10,10 +10,6 @@ pub mod traits;
 use tables::TableHandle;
 use traits::{DbFlags, DbName, DupSort, Mode, Table, TableDecode, TableEncode};
 
-/// An mdbx interaction can be though of in three levels of abstraction: environment, database, and transaction or cursor.
-///
-/// Opening an environment creates the storage file. You should be careful not to open the same mdbx environment more than once from the same process. If your process needs to access the database from multiple threads, you must share the same environment between them, or mdbx will return `MDBX_BUSY`.
-
 fn open_env<E: EnvironmentKind>(
     path: &Path,
     num_tables: usize,
@@ -183,7 +179,7 @@ impl<'env, K: TransactionKind> MdbxTx<'env, K> {
 }
 
 impl<'env> MdbxTx<'env, RW> {
-    pub fn set<'tx, T, F>(
+    pub fn put<'tx, T, F>(
         &'tx self,
         db: TableHandle<'tx, T::Name, F>,
         key: T::Key,
@@ -196,6 +192,12 @@ impl<'env> MdbxTx<'env, RW> {
         self.inner
             .put(db.as_ref(), key.encode(), val.encode(), WriteFlags::UPSERT)
             .map_err(From::from)
+    }
+
+    /// Commit the transaction. The Drop impl for mdbx::Transaction will take care
+    /// of this, but use this method explicitly if you wish to handle any errors.
+    pub fn commit(self) -> Result<bool> {
+        self.inner.commit().map_err(From::from)
     }
 }
 

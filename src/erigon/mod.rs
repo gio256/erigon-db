@@ -283,7 +283,7 @@ impl<'env> Erigon<'env, mdbx::RW> {
     where
         T: Table<'tx> + DefaultFlags,
     {
-        self.0.set::<T, T::Flags>(self.0.open_db()?, key, val)
+        self.0.put::<T, T::Flags>(self.0.open_db()?, key, val)
     }
 
     pub fn write_head_header_hash(&self, v: H256) -> Result<()> {

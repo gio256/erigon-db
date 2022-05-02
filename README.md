@@ -42,5 +42,6 @@ In particular, it repurposes many of Akula's [`kv`](https://github.com/akula-bft
 These abstractions are extremely high-quality in my opinion, so the primary modifications were increasing the strictness and expressiveness of the accessor types and tailoring to Erigon's data representations and database layout.
 
 ## Resources
-- Erigon has an excellent doc walking through their database layout, though it may not match the current implementation in some places. [Here](https://github.com/ledgerwatch/erigon/blob/devel/docs/programmers_guide/db_walkthrough.MD).
+- Erigon has an excellent [doc](https://github.com/ledgerwatch/erigon/blob/devel/docs/programmers_guide/db_walkthrough.MD) walking through their database layout, though it may not match the current implementation in some places.
 - Erigon's [`core/rawdb/accessors_*.go`](https://github.com/ledgerwatch/erigon/blob/f9d7cb5ca9e8a135a76ddcb6fa4ee526ea383554/core/rawdb/accessors_chain.go#L39) contains many of their low-level database interactions.
+- Some [comments](https://github.com/ledgerwatch/erigon/blob/devel/docs/programmers_guide/db_faq.md) from Erigon on the advisability of this endeavor.
