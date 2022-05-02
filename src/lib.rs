@@ -19,7 +19,7 @@ mod tests {
     #[test]
     fn test() -> eyre::Result<()> {
         let path = Path::new(env!("ERIGON_CHAINDATA"));
-        let env = Erigon::open_ro(path)?;
+        let env = env_open(path)?;
         let db = Erigon::begin(&env)?;
 
         let dst: Address = "0xa94f5374Fce5edBC8E2a8697C15331677e6EbF0B"

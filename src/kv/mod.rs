@@ -10,6 +10,10 @@ pub mod traits;
 use tables::TableHandle;
 use traits::{DbFlags, DbName, DupSort, Mode, Table, TableDecode, TableEncode};
 
+/// An mdbx interaction can be though of in three levels of abstraction: environment, database, and transaction or cursor.
+///
+/// Opening an environment creates the storage file. You should be careful not to open the same mdbx environment more than once from the same process. If your process needs to access the database from multiple threads, you must share the same environment between them, or mdbx will return `MDBX_BUSY`.
+
 fn open_env<E: EnvironmentKind>(
     path: &Path,
     num_tables: usize,
@@ -44,6 +48,24 @@ impl<M> MdbxEnv<M> {
     pub fn inner(&self) -> &mdbx::Environment<NoWriteMap> {
         &self.inner
     }
+}
+
+impl<M: Mode> MdbxEnv<M> {
+    /// Open an mdbx environment. Note that even when opening an environment in
+    /// read-only mode, mdbx will still modify the LCK-file, unless the filesystem
+    /// is read-only.
+    pub fn open(path: &Path, num_tables: usize, flags: EnvFlags) -> Result<Self> {
+        let mode = if M::is_writeable() {
+            mdbx::Mode::ReadWrite { sync_mode: mdbx::SyncMode::Durable, }
+        } else {
+            mdbx::Mode::ReadOnly
+        };
+        Ok(Self {
+            inner: open_env(path, num_tables, flags.with_mode(mode))?,
+            _mode: std::marker::PhantomData,
+        })
+    }
+
     /// Create a read-only mdbx transaction.
     pub fn begin_ro(&self) -> Result<MdbxTx<'_, RO>> {
         Ok(MdbxTx::new(self.inner.begin_ro_txn()?))
@@ -51,29 +73,13 @@ impl<M> MdbxEnv<M> {
 }
 
 impl MdbxEnv<RO> {
-    /// Open an mdbx environment in read-only mode. Mdbx will still modify the
-    /// LCK-file, unless the filesystem is read-only.
-    pub fn open_ro(path: &Path, num_tables: usize, flags: EnvFlags) -> Result<Self> {
-        let flags = flags.with_mode(mdbx::Mode::ReadOnly);
-        Ok(Self {
-            inner: open_env(path, num_tables, flags)?,
-            _mode: std::marker::PhantomData,
-        })
+    /// Create a read-only mdbx transaction.
+    pub fn begin(&self) -> Result<MdbxTx<'_, RO>> {
+        Ok(MdbxTx::new(self.inner.begin_ro_txn()?))
     }
 }
 
 impl MdbxEnv<RW> {
-    /// Open an mdbx environment in read-write mode.
-    pub fn open_rw(path: &Path, num_tables: usize, flags: EnvFlags) -> Result<Self> {
-        let flags = flags.with_mode(mdbx::Mode::ReadWrite {
-            sync_mode: mdbx::SyncMode::Durable,
-        });
-        Ok(Self {
-            inner: open_env(path, num_tables, flags)?,
-            _mode: std::marker::PhantomData,
-        })
-    }
-
     /// Create a read-write mdbx transaction. Blocks if another rw transaction is open.
     pub fn begin_rw(&self) -> Result<MdbxTx<'_, RW>> {
         Ok(MdbxTx::new(self.inner.begin_rw_txn()?))
@@ -92,8 +98,9 @@ pub struct EnvFlags {
     /// by default an MDBX_INCOMPATIBLE error will be thrown. If `accede` is set,
     /// the requested table will instead be opened with the existing flags.
     pub accede: bool,
-    /// Treat the given path as the main data file rather than creating data and
-    /// lock files under a subdirectory.
+    /// By default, mdbx interprets the given path as a directory under which
+    /// the lock file and storage file will be found or created. If `no_sub_dir`
+    /// is set, this path is instead interpreted to be the storage file itself.
     pub no_sub_dir: bool,
     /// Attempt to take an exclusive lock on the environment. If another process
     /// is already using the environment, returns MDBX_BUSY.
@@ -133,6 +140,7 @@ where
         &'tx self,
     ) -> Result<TableHandle<'tx, Db, Flags>> {
         let mut flags = Flags::FLAGS;
+        // If the transaction is read-write, create the database if it does not exist already.
         if M::is_writeable() {
             flags |= DatabaseFlags::CREATE;
         }

@@ -2,12 +2,14 @@
 Fully typed access to [Erigon](https://github.com/ledgerwatch/erigon)'s mdbx database in rust.
 
 ```rust
-use erigon_db::Erigon;
+use erigon_db::{Erigon, env_open};
 use ethereum_types::Address;
 
 fn main() -> eyre::Result<()> {
     let path = std::path::Path::new(env!("ERIGON_CHAINDATA"));
-    let env = Erigon::open_ro(path)?;
+
+    // Open an mdbx environment and begin a read-only database transaction
+    let env = env_open(path)?;
     let db = Erigon::begin(&env)?;
 
     // get the canonical head block header

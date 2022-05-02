@@ -31,21 +31,20 @@ pub const ENV_FLAGS: EnvFlags = EnvFlags {
     liforeclaim: false,
 };
 
+/// Open an mdbx env with Erigon-specific configuration.
+pub fn env_open<M: Mode>(path: &std::path::Path) -> Result<MdbxEnv<M>> {
+    MdbxEnv::<M>::open(path, NUM_TABLES, ENV_FLAGS)
+}
+
 /// Erigon wraps an `MdbxTx` and provides Erigon-specific access methods.
 pub struct Erigon<'env, K: TransactionKind>(pub MdbxTx<'env, K>);
 
 impl<'env> Erigon<'env, RO> {
-    pub fn open_ro(path: &std::path::Path) -> Result<MdbxEnv<RO>> {
-        MdbxEnv::open_ro(path, NUM_TABLES, ENV_FLAGS)
-    }
     pub fn begin(env: &'env MdbxEnv<RO>) -> Result<Self> {
-        env.begin_ro().map(Self)
+        env.begin().map(Self)
     }
 }
 impl<'env> Erigon<'env, RW> {
-    pub fn open_rw(path: &std::path::Path) -> Result<MdbxEnv<RW>> {
-        MdbxEnv::open_rw(path, NUM_TABLES, ENV_FLAGS)
-    }
     pub fn begin_rw(env: &'env MdbxEnv<RW>) -> Result<Self> {
         env.begin_rw().map(Self)
     }
