@@ -89,7 +89,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the decoded account data as stored in the PlainState table.
-    pub fn read_account_data(&self, adr: Address) -> Result<Option<Account>> {
+    pub fn read_account(&self, adr: Address) -> Result<Option<Account>> {
         self.read::<PlainState>(adr)
     }
 
@@ -99,12 +99,16 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the block header identified by the (block number, block hash) key
-    pub fn read_header(&self, key: HeaderKey) -> Result<Option<BlockHeader>> {
-        self.read::<Header>(key)
+    pub fn read_header(&self, key: impl Into<HeaderKey>) -> Result<Option<BlockHeader>> {
+        self.read::<Header>(key.into())
     }
 
     /// Returns the decoding of the body as stored in the BlockBody table
-    pub fn read_body_for_storage(&self, key: HeaderKey) -> Result<Option<BodyForStorage>> {
+    pub fn read_body_for_storage(
+        &self,
+        key: impl Into<HeaderKey>,
+    ) -> Result<Option<BodyForStorage>> {
+        let key = key.into();
         self.read::<BlockBody>(key)?
             .map(|mut body| {
                 // Skip 1 system tx at the beginning of the block and 1 at the end
@@ -135,13 +139,13 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the signers of each transaction in the block.
-    pub fn read_senders(&self, key: HeaderKey) -> Result<Option<Vec<Address>>> {
-        self.read::<TxSender>(key)
+    pub fn read_senders(&self, key: impl Into<HeaderKey>) -> Result<Option<Vec<Address>>> {
+        self.read::<TxSender>(key.into())
     }
 
     /// Returns the hash assigned to a canonical block number.
-    pub fn read_canonical_hash(&self, num: BlockNumber) -> Result<Option<H256>> {
-        self.read::<CanonicalHeader>(num)
+    pub fn read_canonical_hash(&self, num: impl Into<BlockNumber>) -> Result<Option<H256>> {
+        self.read::<CanonicalHeader>(num.into())
     }
 
     /// Determines whether a header with the given hash is on the canonical chain.
@@ -152,8 +156,13 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns the value of the storage for account `adr` indexed by `slot`.
-    pub fn read_storage(&self, adr: Address, inc: Incarnation, slot: H256) -> Result<Option<U256>> {
-        let bucket = StorageKey::new(adr, inc);
+    pub fn read_storage(
+        &self,
+        adr: Address,
+        inc: impl Into<Incarnation>,
+        slot: H256,
+    ) -> Result<Option<U256>> {
+        let bucket = StorageKey::new(adr, inc.into());
         let mut cur = self.cursor::<Storage>()?;
         cur.seek_dup(bucket, slot)
             .map(|kv| kv.and_then(|(k, v)| if k == slot { Some(v) } else { None }))
@@ -164,9 +173,9 @@ impl<'env, K: Mode> Erigon<'env, K> {
     pub fn walk_storage(
         &self,
         adr: Address,
-        inc: Incarnation,
+        inc: impl Into<Incarnation>,
     ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
-        let start_key = StorageKey::new(adr, inc);
+        let start_key = StorageKey::new(adr, inc.into());
         self.cursor::<Storage>()?.walk_dup(start_key)
     }
 
@@ -178,9 +187,9 @@ impl<'env, K: Mode> Erigon<'env, K> {
         self.read::<Code>(codehash)
     }
 
-    /// Returns the code associated with the given codehash.
-    pub fn read_codehash(&self, adr: Address, inc: Incarnation) -> Result<Option<H256>> {
-        let key = PlainCodeKey(adr, inc);
+    /// Returns the codehash at the `adr` with incarnation `inc`
+    pub fn read_codehash(&self, adr: Address, inc: impl Into<Incarnation>) -> Result<Option<H256>> {
+        let key = PlainCodeKey(adr, inc.into());
         self.read::<PlainCodeHash>(key)
     }
 
@@ -213,11 +222,19 @@ impl<'env, K: Mode> Erigon<'env, K> {
     // - `GetAsOf()` Erigon implementation [here](https://github.com/ledgerwatch/erigon/blob/f9d7cb5ca9e8a135a76ddcb6fa4ee526ea383554/core/state/history.go#L19).
     //
     /// Returns the state of account `adr` at the given block number.
-    pub fn read_account_hist(&self, adr: Address, block: BlockNumber) -> Result<Option<Account>> {
+    pub fn read_account_hist(
+        &self,
+        adr: Address,
+        block: impl Into<BlockNumber>,
+    ) -> Result<Option<Account>> {
+        let block = block.into();
         let mut hist_cur = self.cursor::<AccountHistory>()?;
         let mut cs_cur = self.cursor::<AccountChangeSet>()?;
         let (_, bitmap) = hist_cur.seek((adr, block))?.ok_or(eyre!("No value"))?;
-        let cs_block = BlockNumber(utils::find_gte(bitmap, *block));
+        let cs_block = match utils::find_gte(bitmap, *block) {
+            Some(changeset) => BlockNumber(changeset),
+            _ => return Ok(None)
+        };
         if let Some((k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
             if k == adr {
                 // recover the codehash
@@ -237,17 +254,21 @@ impl<'env, K: Mode> Erigon<'env, K> {
     pub fn read_storage_hist(
         &self,
         adr: Address,
-        inc: Incarnation,
+        inc: impl Into<Incarnation>,
         slot: H256,
-        block: BlockNumber,
+        block: impl Into<BlockNumber>,
     ) -> Result<Option<U256>> {
+        let block = block.into();
         let mut hist_cur = self.cursor::<StorageHistory>()?;
         let mut cs_cur = self.cursor::<StorageChangeSet>()?;
         let (_, bitmap) = hist_cur
             .seek(StorageHistKey(adr, slot, block))?
             .ok_or(eyre!("No value"))?;
-        let cs_block = BlockNumber(utils::find_gte(bitmap, *block));
-        let cs_key = (cs_block, StorageKey::new(adr, inc));
+        let cs_block = match utils::find_gte(bitmap, *block) {
+            Some(changeset) => BlockNumber(changeset),
+            _ => return Ok(None)
+        };
+        let cs_key = (cs_block, StorageKey::new(adr, inc.into()));
         if let Some((k, v)) = cs_cur.seek_dup(cs_key, slot)? {
             if k == slot {
                 return Ok(Some(v));
@@ -275,7 +296,7 @@ impl<'env> Erigon<'env, mdbx::RW> {
     pub fn write_incarnation(&self, k: Address, v: Incarnation) -> Result<()> {
         self.write::<IncarnationMap>(k, v)
     }
-    pub fn write_account_data(&self, k: Address, v: Account) -> Result<()> {
+    pub fn write_account(&self, k: Address, v: Account) -> Result<()> {
         self.write::<PlainState>(k, v)
     }
     pub fn write_transaction_block_number(&self, k: H256, v: U256) -> Result<()> {

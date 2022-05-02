@@ -107,6 +107,12 @@ impl TableDecode for HeaderKey {
     }
 }
 
+impl From<(BlockNumber, H256)> for HeaderKey {
+    fn from(src: (BlockNumber, H256)) -> Self {
+        Self(src.0, src.1)
+    }
+}
+
 // (address, storage_key, block_number)
 table_key!(StorageHistKey(Address, H256, BlockNumber));
 

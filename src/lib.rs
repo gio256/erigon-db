@@ -28,11 +28,11 @@ mod tests {
         let contract: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2"
             .parse()
             .unwrap();
-        let res = db.read_account_hist(contract, 3.into())?;
+        let res = db.read_account_hist(contract, 3)?;
 
         let slot = H256::from_low_u64_be(1);
-        let res = db.read_storage_hist(contract, 1.into(), slot, 3.into())?;
-        let current = db.read_storage(contract, 1.into(), slot)?;
+        let res = db.read_storage_hist(contract, 1, slot, 3)?;
+        let current = db.read_storage(contract, 1, slot)?;
 
         let hash = db.read_head_block_hash()?.unwrap();
         let num = db.read_header_number(hash)?.unwrap();
