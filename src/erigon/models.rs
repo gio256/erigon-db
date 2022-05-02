@@ -9,10 +9,13 @@ use fastrlp::{
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{erigon::utils, kv::{
-    tables::{TooLong, TooShort, VariableVec},
-    traits::{TableDecode, TableEncode},
-}};
+use crate::{
+    erigon::utils,
+    kv::{
+        tables::{TooLong, TooShort, VariableVec},
+        traits::{TableDecode, TableEncode},
+    },
+};
 
 pub const KECCAK_LENGTH: usize = H256::len_bytes();
 pub const ADDRESS_LENGTH: usize = Address::len_bytes();

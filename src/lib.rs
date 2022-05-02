@@ -15,10 +15,33 @@ mod tests {
     };
     use ethereum_types::*;
     use fastrlp::*;
-    use std::path::Path;
+    use once_cell::sync::Lazy;
+    use std::{path::Path, sync::Arc};
+
+    struct TempMdbxEnv<M> {
+        pub inner: MdbxEnv<M>,
+        _leak: tempfile::TempDir,
+    }
+
+    static ENV: Lazy<Arc<TempMdbxEnv<mdbx::RW>>> = Lazy::new(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = erigon::env_open(dir.path()).expect("failed to open mem db");
+        Arc::new(TempMdbxEnv { inner, _leak: dir })
+    });
 
     #[test]
-    fn test() -> eyre::Result<()> {
+    fn test_mem_db() -> eyre::Result<()> {
+        let env = ENV.clone();
+        let db = Erigon::begin_rw(&env.inner)?;
+        let hash = H256::from_low_u64_be(u64::MAX);
+        db.write_head_header_hash(hash)?;
+        let res = db.read_head_header_hash()?.unwrap();
+        assert_eq!(res, hash);
+        Ok(())
+    }
+
+    #[test]
+    fn test_live() -> eyre::Result<()> {
         let path = Path::new(env!("ERIGON_CHAINDATA"));
         let env = env_open(path)?;
         let db = Erigon::begin(&env)?;

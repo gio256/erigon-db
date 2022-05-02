@@ -52,7 +52,9 @@ impl<M: Mode> MdbxEnv<M> {
     /// is read-only.
     pub fn open(path: &Path, num_tables: usize, flags: EnvFlags) -> Result<Self> {
         let mode = if M::is_writeable() {
-            mdbx::Mode::ReadWrite { sync_mode: mdbx::SyncMode::Durable, }
+            mdbx::Mode::ReadWrite {
+                sync_mode: mdbx::SyncMode::Durable,
+            }
         } else {
             mdbx::Mode::ReadOnly
         };

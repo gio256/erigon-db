@@ -1,4 +1,6 @@
 /target
 /Cargo.lock
 /data
+/build
+src/bindings
 notes.rs

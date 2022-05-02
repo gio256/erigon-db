@@ -232,7 +232,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
         let (_, bitmap) = hist_cur.seek((adr, block))?.ok_or(eyre!("No value"))?;
         let cs_block = match utils::find_gte(bitmap, *block) {
             Some(changeset) => BlockNumber(changeset),
-            _ => return Ok(None)
+            _ => return Ok(None),
         };
         if let Some((k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
             if k == adr {
@@ -265,7 +265,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
             .ok_or(eyre!("No value"))?;
         let cs_block = match utils::find_gte(bitmap, *block) {
             Some(changeset) => BlockNumber(changeset),
-            _ => return Ok(None)
+            _ => return Ok(None),
         };
         let cs_key = (cs_block, StorageKey::new(adr, inc.into()));
         if let Some((k, v)) = cs_cur.seek_dup(cs_key, slot)? {
