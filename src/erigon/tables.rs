@@ -1,6 +1,6 @@
 use crate::{
     dupsort_table,
-    erigon::models::*,
+    erigon::{macros, models::*},
     kv::{tables::TableHandle, traits::*, EnvFlags},
     table,
 };
@@ -37,9 +37,9 @@ table!(AccountHistory           => AccountHistKey => RoaringTreemap);
 /// key: address|slot|shard_id_u64. val: bitmap of blocks w/ change.
 table!(StorageHistory           => StorageHistKey => RoaringTreemap);
 /// key: blocknum. val: address|encode(account)
-dupsort_table!(AccountChangeSet => BlockNumber  => (Address, Account), subkey = Address);
+dupsort_table!(AccountChangeSet => BlockNumber  => AccountCSVal, subkey = Address);
 /// key: blocknum|address|incarnation. val: slot|slot_value
-dupsort_table!(StorageChangeSet => StorageCSKey => (H256, U256), subkey = H256);
+dupsort_table!(StorageChangeSet => StorageCSKey => StorageCSVal, subkey = H256);
 /// key: address. val: encode(account). PlainState table also contains Storage.
 table!(PlainState               => Address      => Account);
 /// key: address|incarnation. val: slot|slot_value (dupsorted). erigon: PlainState
@@ -87,24 +87,7 @@ table!(LogAddressIndex => Todo => Todo);
 /// key: blocknum|address.
 dupsort_table!(CallTraceSet => Todo => Todo, subkey = Todo);
 
-// The latest header and latest block are stored in their own tables, addressed
-// by a dummy key ("LastHeader" and "LastBlock", respectively). We encode the
-// names of these tables as their own keys to prevent invalid accesses.
-macro_rules! encode_const {
-    ($name:ident, $encoded:ident) => {
-        impl TableEncode for $name {
-            type Encoded = Vec<u8>;
-            fn encode(self) -> Self::Encoded {
-                String::from(stringify!($encoded)).into_bytes()
-            }
-        }
-    };
-    ($name:ident) => {
-        encode_const!($name, $name);
-    };
-}
-
 // every query of the LastHeader table takes the same key, "LastHeader"
-encode_const!(LastHeader);
+macros::constant_key!(LastHeader);
 // every query of the LastBlock table takes the same key, "LastBlock"
-encode_const!(LastBlock);
+macros::constant_key!(LastBlock);

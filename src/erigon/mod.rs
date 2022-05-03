@@ -8,12 +8,19 @@ use eyre::{eyre, Result};
 use fastrlp::{Decodable, Encodable};
 use mdbx::{TransactionKind, RO, RW};
 
-use tables::*;
+// mod foo {
+//     macro_rules! bar { () => () }
+//     pub(crate) use bar;
+// }
+mod macros;
+// macros::bar!();
+
 
 pub mod models;
 pub mod tables;
 mod utils;
 
+use tables::*;
 use models::*;
 
 pub const NUM_TABLES: usize = 50;
@@ -241,7 +248,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
             _ => return Ok(None),
         };
         let mut cs_cur = self.cursor::<AccountChangeSet>()?;
-        if let Some((k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
+        if let Some(AccountCSVal(k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
             if k == adr {
                 // recover the codehash
                 if acct.incarnation > 0 && acct.codehash == Default::default() {
@@ -273,9 +280,9 @@ impl<'env, K: Mode> Erigon<'env, K> {
             Some(changeset) => BlockNumber(changeset),
             _ => return Ok(None),
         };
-        let cs_key = (cs_block, adr, inc).into();
+        let cs_key = (cs_block, adr, inc.into()).into();
         let mut cs_cur = self.cursor::<StorageChangeSet>()?;
-        if let Some((k, v)) = cs_cur.seek_dup(cs_key, slot)? {
+        if let Some(StorageCSVal(k, v)) = cs_cur.seek_dup(cs_key, slot)? {
             if k == slot {
                 return Ok(Some(v));
             }

@@ -33,6 +33,7 @@ fastrlp = { version = "0.1", features = [
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = "1"
 tiny-keccak = "2.0"
+seq-macro = "0.3"
 
 tokio = { version = "1.5", features = ["macros", "rt-multi-thread"], optional = true }
 ethers = { git = "https://github.com/gakonst/ethers-rs", optional = true }

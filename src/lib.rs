@@ -64,6 +64,7 @@ mod tests {
         let num = db.read_header_number(hash)?.unwrap();
 
         let td = db.read_total_difficulty((num, hash))?.unwrap();
+        dbg!(td);
 
         // let burnt = db.read::<crate::tables::Burnt>(1.into())?.unwrap();
         // dbg!(burnt);

@@ -10,7 +10,7 @@ use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    erigon::utils,
+    erigon::{utils::*, macros::*},
     kv::{
         tables::{TooLong, TooShort, VariableVec},
         traits::{TableDecode, TableEncode},
@@ -26,163 +26,15 @@ pub const EMPTY_HASH: H256 = H256(hex_literal::hex!(
     "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
 ));
 
-macro_rules! bytes_wrapper {
-    ($t:ident) => {
-        #[derive(
-            Clone,
-            Debug,
-            PartialEq,
-            Eq,
-            Default,
-            Deref,
-            DerefMut,
-            Serialize,
-            Deserialize,
-            Encode,
-            Decode,
-            RlpEncodable,
-            RlpDecodable,
-        )]
-        pub struct $t(pub Bytes);
-        impl TableEncode for $t {
-            type Encoded = bytes::Bytes;
-            fn encode(self) -> Self::Encoded {
-                self.0
-            }
-        }
+// blocknum|blockhash
+tuple_key!(HeaderKey(BlockNumber, H256));
+tuple_key!(AccountHistKey(Address, BlockNumber));
+tuple_key!(StorageKey(Address, Incarnation));
 
-        impl TableDecode for $t {
-            fn decode(b: &[u8]) -> Result<Self> {
-                TableDecode::decode(b).map(Self)
-            }
-        }
-    };
-}
-bytes_wrapper!(Rlp);
-bytes_wrapper!(Bytecode);
-
-macro_rules! table_key {
-    ($name:ident($($t:ty),+)) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Default,
-            Serialize,
-            Deserialize,
-            Encode,
-            Decode,
-            RlpEncodable,
-            RlpDecodable,
-        )]
-        pub struct $name($(pub $t),+);
-
-        impl $name {
-            pub const SIZE: usize = 0 $(+ std::mem::size_of::<$t>())+;
-        }
-    }
-}
-
-table_key!(HeaderKey(BlockNumber, H256));
-
-impl TableEncode for HeaderKey {
-    type Encoded = VariableVec<{ Self::SIZE }>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.try_extend_from_slice(&self.0.encode()).unwrap();
-        out.try_extend_from_slice(&self.1.encode()).unwrap();
-        out
-    }
-}
-
-impl TableDecode for HeaderKey {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > Self::SIZE {
-            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
-        }
-        if b.len() < U64_LENGTH {
-            return Err(TooShort::<{ U64_LENGTH }> { got: b.len() }.into());
-        }
-        let (num, hash) = b.split_at(U64_LENGTH);
-        Ok(Self(TableDecode::decode(num)?, TableDecode::decode(hash)?))
-    }
-}
-
-impl<BN: Into<BlockNumber>> From<(BN, H256)> for HeaderKey {
-    fn from(src: (BN, H256)) -> Self {
-        Self(src.0.into(), src.1)
-    }
-}
-
-table_key!(AccountHistKey(Address, BlockNumber));
-
-impl TableEncode for AccountHistKey {
-    type Encoded = VariableVec<{ Self::SIZE }>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.try_extend_from_slice(&self.0.encode()).unwrap();
-        out.try_extend_from_slice(&self.1.encode()).unwrap();
-        out
-    }
-}
-
-impl TableDecode for AccountHistKey {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > Self::SIZE {
-            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
-        }
-        if b.len() < ADDRESS_LENGTH {
-            return Err(TooShort::<{ ADDRESS_LENGTH }> { got: b.len() }.into());
-        }
-        let (fst, snd) = b.split_at(ADDRESS_LENGTH);
-        Ok(Self(TableDecode::decode(fst)?, TableDecode::decode(snd)?))
-    }
-}
-
-impl<BN: Into<BlockNumber>> From<(Address, BN)> for AccountHistKey {
-    fn from(src: (Address, BN)) -> Self {
-        Self(src.0, src.1.into())
-    }
-}
-
-// (block_number, address, incarnation)
-table_key!(StorageCSKey(BlockNumber, StorageKey));
-
-impl TableEncode for StorageCSKey {
-    type Encoded = VariableVec<{ Self::SIZE }>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.try_extend_from_slice(&self.0.encode()).unwrap();
-        out.try_extend_from_slice(&self.1.encode()).unwrap();
-        out
-    }
-}
-
-impl TableDecode for StorageCSKey {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > Self::SIZE {
-            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
-        }
-        if b.len() < KECCAK_LENGTH + ADDRESS_LENGTH {
-            return Err(TooShort::<{ KECCAK_LENGTH + ADDRESS_LENGTH }> { got: b.len() }.into());
-        }
-        let (fst, snd) = b.split_at(KECCAK_LENGTH);
-        Ok(Self(TableDecode::decode(fst)?, TableDecode::decode(snd)?))
-    }
-}
-
-impl<B, S> From<(B, S)> for StorageCSKey
-where
-    B: Into<BlockNumber>,
-    S: Into<StorageKey>,
-{
-    fn from(src: (B, S)) -> Self {
-        Self(src.0.into(), src.1.into())
-    }
-}
-
+// slot|value
+tuple_key!(StorageCSVal(H256, U256));
+// blocknum|address|incarnation
+tuple_key!(StorageCSKey(BlockNumber, StorageKey));
 impl<B, A, I> From<(B, A, I)> for StorageCSKey
 where
     B: Into<BlockNumber>,
@@ -193,190 +45,38 @@ where
     }
 }
 
-// (address, storage_key, block_number)
-table_key!(StorageHistKey(Address, H256, BlockNumber));
+// address|encode(account)
+tuple_key!(AccountCSVal(Address, Account));
 
-impl TableEncode for StorageHistKey {
-    type Encoded = VariableVec<{ Self::SIZE }>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.try_extend_from_slice(&self.0.encode()).unwrap();
-        out.try_extend_from_slice(&self.1.encode()).unwrap();
-        out.try_extend_from_slice(&self.2.encode()).unwrap();
-        out
-    }
-}
+// address|storage_slot|block_number
+tuple_key!(StorageHistKey(Address, H256, BlockNumber));
+// address|incarnation
+tuple_key!(PlainCodeKey(Address, Incarnation));
 
-impl TableDecode for StorageHistKey {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > Self::SIZE {
-            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
-        }
-        if b.len() < ADDRESS_LENGTH + KECCAK_LENGTH {
-            return Err(TooShort::<{ ADDRESS_LENGTH + KECCAK_LENGTH }> { got: b.len() }.into());
-        }
-        let (adr, rest) = b.split_at(ADDRESS_LENGTH);
-        let (key, shard_id) = rest.split_at(KECCAK_LENGTH);
-        Ok(Self(
-            TableDecode::decode(adr)?,
-            TableDecode::decode(key)?,
-            TableDecode::decode(shard_id)?,
-        ))
-    }
-}
-
-impl<BN: Into<BlockNumber>> From<(Address, H256, BN)> for StorageHistKey {
-    fn from(src: (Address, H256, BN)) -> Self {
-        Self(src.0, src.1, src.2.into())
-    }
-}
-
-/// Key for the PlainContractCode table (address | incarnation)
-table_key!(PlainCodeKey(Address, Incarnation));
-
-impl TableEncode for PlainCodeKey {
-    type Encoded = VariableVec<{ Self::SIZE }>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.try_extend_from_slice(&self.0.encode()).unwrap();
-        out.try_extend_from_slice(&self.1.encode()).unwrap();
-        out
-    }
-}
-
-impl TableDecode for PlainCodeKey {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > Self::SIZE {
-            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
-        }
-        if b.len() < ADDRESS_LENGTH {
-            return Err(TooShort::<{ ADDRESS_LENGTH }> { got: b.len() }.into());
-        }
-        let (fst, snd) = b.split_at(ADDRESS_LENGTH);
-        Ok(Self(TableDecode::decode(fst)?, TableDecode::decode(snd)?))
-    }
-}
-
-impl<I: Into<Incarnation>> From<(Address, I)> for PlainCodeKey {
-    fn from(src: (Address, I)) -> Self {
-        Self(src.0, src.1.into())
-    }
-}
-
-table_key!(ContractCodeKey(H256, Incarnation));
-
+// keccak(address)|incarnation
+tuple_key!(ContractCodeKey(H256, Incarnation));
 impl ContractCodeKey {
-    fn new(who: Address, inc: Incarnation) -> Self {
-        Self(utils::keccak256(who).into(), inc)
+    pub fn new(who: Address, inc: impl Into<Incarnation>) -> Self {
+        Self(keccak256(who).into(), inc.into())
     }
 }
 
-impl TableEncode for ContractCodeKey {
-    type Encoded = VariableVec<{ Self::SIZE }>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.try_extend_from_slice(&self.0.encode()).unwrap();
-        out.try_extend_from_slice(&self.1.encode()).unwrap();
-        out
-    }
-}
-
-impl TableDecode for ContractCodeKey {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > Self::SIZE {
-            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
-        }
-        if b.len() < KECCAK_LENGTH {
-            return Err(TooShort::<{ KECCAK_LENGTH }> { got: b.len() }.into());
-        }
-        let (fst, snd) = b.split_at(KECCAK_LENGTH);
-        Ok(Self(TableDecode::decode(fst)?, TableDecode::decode(snd)?))
-    }
-}
-
-impl<I: Into<Incarnation>> From<(H256, I)> for ContractCodeKey {
-    fn from(src: (H256, I)) -> Self {
-        Self(src.0, src.1.into())
-    }
-}
-
-/// Key for the HashedStorage table (keccak(address) | incarnation | keccak(storage_key))
-table_key!(HashStorageKey(H256, Incarnation, H256));
-
-impl TableEncode for HashStorageKey {
-    type Encoded = VariableVec<{ Self::SIZE }>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.try_extend_from_slice(&self.0.encode()).unwrap();
-        out.try_extend_from_slice(&self.1.encode()).unwrap();
-        out.try_extend_from_slice(&self.2.encode()).unwrap();
-        out
-    }
-}
-
+// keccak(address)|incarnation|keccak(storage_key)
+tuple_key!(HashStorageKey(H256, Incarnation, H256));
 impl HashStorageKey {
     pub fn new(who: Address, inc: impl Into<Incarnation>, key: H256) -> Self {
         Self(
-            utils::keccak256(who).into(),
+            keccak256(who).into(),
             inc.into(),
-            utils::keccak256(key).into(),
+            keccak256(key).into(),
         )
     }
 }
 
-impl TableEncode for (Address, Account) {
-    type Encoded = Vec<u8>;
-    fn encode(self) -> Self::Encoded {
-        let mut out = Self::Encoded::default();
-        out.extend_from_slice(&self.0.encode());
-        out.append(&mut self.1.encode());
-        out
-    }
-}
-
-impl TableDecode for (Address, Account) {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() < ADDRESS_LENGTH {
-            return Err(TooShort::<{ ADDRESS_LENGTH }> { got: b.len() }.into());
-        }
-        let (adr, acct) = b.split_at(ADDRESS_LENGTH);
-        Ok((TableDecode::decode(adr)?, TableDecode::decode(acct)?))
-    }
-}
-
-table_key!(StorageKey(Address, Incarnation));
-
-impl<I: Into<Incarnation>> From<(Address, I)> for StorageKey {
-    fn from(src: (Address, I)) -> Self {
-        Self(src.0, src.1.into())
-    }
-}
-
-impl TableEncode for StorageKey {
-    type Encoded = [u8; Self::SIZE];
-    fn encode(self) -> Self::Encoded {
-        let mut out = [0; Self::SIZE];
-        out[..ADDRESS_LENGTH].copy_from_slice(&self.0.encode());
-        out[ADDRESS_LENGTH..].copy_from_slice(&self.1.encode());
-        out
-    }
-}
-impl TableDecode for StorageKey {
-    fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > Self::SIZE {
-            return Err(TooLong::<{ Self::SIZE }> { got: b.len() }.into());
-        }
-        if b.len() < ADDRESS_LENGTH {
-            return Err(TooShort::<{ ADDRESS_LENGTH }> { got: b.len() }.into());
-        }
-        let (fst, snd) = b.split_at(ADDRESS_LENGTH);
-        Ok(Self(TableDecode::decode(fst)?, TableDecode::decode(snd)?))
-    }
-}
-
 // The Issuance table also stores the amount burnt, prefixing the encoded block number with "burnt"
-table_key!(BurntKey(BlockNumber));
-
+// bytes("burnt")|blocknum
+declare_tuple!(BurntKey(BlockNumber));
+size_tuple!(BurntKey(BlockNumber));
 impl TableEncode for BurntKey {
     type Encoded = VariableVec<{ Self::SIZE + 5 }>;
     fn encode(self) -> Self::Encoded {
@@ -388,13 +88,10 @@ impl TableEncode for BurntKey {
     }
 }
 
-impl<BN: Into<BlockNumber>> From<BN> for BurntKey {
-    fn from(src: BN) -> Self {
-        Self(src.into())
-    }
-}
+bytes_wrapper!(Rlp(Bytes));
+bytes_wrapper!(Bytecode(Bytes));
 
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize, Serialize, Encode, Decode, RlpEncodable, RlpDecodable)]
 pub struct Account {
     pub nonce: u64,
     pub incarnation: Incarnation,
@@ -442,7 +139,6 @@ impl TableDecode for Account {
             acct.codehash = H256::from_slice(&enc[..KECCAK_LENGTH]);
             enc.advance(KECCAK_LENGTH)
         }
-        // TODO: erigon docs mention additional storage hash field, code seems to disagree
         Ok(acct)
     }
 }
@@ -450,23 +146,8 @@ impl TableDecode for Account {
 impl TableEncode for Account {
     type Encoded = Vec<u8>;
     fn encode(self) -> Self::Encoded {
-        Self::Encoded::default()
+        unreachable!("Can't encode Account")
     }
-}
-
-pub fn parse_u64_with_len(enc: &mut &[u8]) -> u64 {
-    let len = enc.get_u8().into();
-    let val = bytes_to_u64(&enc[..len]);
-    enc.advance(len);
-    val
-}
-// https://github.com/akula-bft/akula/blob/a9aed09b31bb41c89832149bcad7248f7fcd70ca/src/models/account.rs#L47
-pub fn bytes_to_u64(buf: &[u8]) -> u64 {
-    let mut decoded = [0u8; 8];
-    for (i, b) in buf.iter().rev().enumerate() {
-        decoded[i] = *b;
-    }
-    u64::from_le_bytes(decoded)
 }
 
 impl Account {
@@ -490,6 +171,7 @@ impl Account {
         self
     }
 }
+
 
 ////
 
