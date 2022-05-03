@@ -53,7 +53,7 @@ impl DbFlags for DupSortFlags {
 }
 #[macro_export]
 macro_rules! table_without_flags {
-    ($name:ident => $key:ty => $value:ty, SeekKey = $seek_key:ty) => {
+    ($name:ident => $key:ty => $value:ty, seek_key = $seek_key:ty, rename = $rename:ident) => {
         #[derive(Debug, Default, Clone, Copy)]
         pub struct $name;
 
@@ -65,7 +65,7 @@ macro_rules! table_without_flags {
         }
 
         impl $crate::kv::traits::DbName for $name {
-            const NAME: &'static str = stringify!($name);
+            const NAME: &'static str = stringify!($rename);
         }
 
         impl std::fmt::Display for $name {
@@ -74,8 +74,14 @@ macro_rules! table_without_flags {
             }
         }
     };
+    ($name:ident => $key:ty => $value:ty, seek_key = $seek_key:ty) => {
+        $crate::table_without_flags!($name => $key => $value, seek_key = $seek_key, rename = $name);
+    };
+    ($name:ident => $key:ty => $value:ty, rename = $rename:ident) => {
+        $crate::table_without_flags!($name => $key => $value, seek_key = $key, rename = $rename);
+    };
     ($name:ident => $key:ty => $value:ty) => {
-        $crate::table_without_flags!($name => $key => $value, SeekKey = $key);
+        $crate::table_without_flags!($name => $key => $value, seek_key = $key, rename = $name);
     };
 }
 
@@ -90,8 +96,8 @@ macro_rules! table {
 }
 #[macro_export]
 macro_rules! dupsort_table {
-    ($name:ident => $key:ty => $value:ty, Subkey = $subkey:ty) => {
-        $crate::table_without_flags!($name => $key => $value);
+    ($name:ident => $key:ty => $value:ty, subkey = $subkey:ty, rename = $rename:ident) => {
+        $crate::table_without_flags!($name => $key => $value, rename = $rename);
         impl $crate::kv::traits::DefaultFlags for $name {
             type Flags = $crate::kv::tables::DupSortFlags;
         }
@@ -99,6 +105,9 @@ macro_rules! dupsort_table {
             type Subkey = $subkey;
         }
     };
+    ($name:ident => $key:ty => $value:ty, subkey = $subkey:ty) => {
+        $crate::dupsort_table!($name => $key => $value, subkey = $subkey, rename = $name);
+    }
 }
 
 // -- Key/Value Encoding/Decoding --
@@ -374,3 +383,20 @@ macro_rules! u64_table_object {
 }
 
 u64_table_object!(u64);
+
+impl TableEncode for u32 {
+    type Encoded = [u8; 4];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_be_bytes()
+    }
+}
+
+impl TableDecode for u32 {
+    fn decode(b: &[u8]) -> Result<Self> {
+        match b.len() {
+            4 => Ok(u32::from_be_bytes(*arrayref::array_ref!(&*b, 0, 4)).into()),
+            other => Err(InvalidLength::<4> { got: other }.into()),
+        }
+    }
+}

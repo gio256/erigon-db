@@ -4,9 +4,88 @@ use crate::{
     kv::{tables::TableHandle, traits::*, EnvFlags},
     table,
 };
+use bytes::Bytes;
 use ethereum_types::{Address, H256, U256};
 use mdbx::DatabaseFlags;
 use roaring::RoaringTreemap;
+
+// --- Erigon db schema version 6.0.0 ---
+
+// Table name                   => Key          => Value
+/// key: bytes("LastHeader"). val: hash of current canonical head header. erigon: HeadHeaderKey
+table!(LastHeader               => LastHeader   => H256);
+/// key: bytes("LastBlock"). val: hash of current canonical head block. erigon: HeadBlockKey
+table!(LastBlock                => LastBlock    => H256);
+/// key: address. val: incarnation of account when it was last deleted
+table!(IncarnationMap           => Address      => Incarnation);
+/// key: tx_hash. val: blocknum containing the tx. erigon: TxLookup
+table!(BlockTransactionLookup   => H256         => U256);
+/// key: header_hash. val: blocknum
+table!(HeaderNumber             => H256         => BlockNumber);
+/// key: blocknum|blockhash. val: rlp(header). erigon: Headers
+table!(Header                   => HeaderKey    => BlockHeader, seek_key = BlockNumber);
+/// key: blocknum|blockhash. val: encode(block_body)
+table!(BlockBody                => HeaderKey    => BodyForStorage, seek_key = BlockNumber);
+/// key: address|incarnation. val: code_hash. erigon: PlainContractCode
+table!(PlainCodeHash            => PlainCodeKey => H256);
+/// key: blocknum|blockhash. val: senders list. erigon: Senders
+table!(TxSender                 => HeaderKey    => Vec<Address>);
+/// key: blocknum. val: blockhash. erigon: HeaderCanonical
+table!(CanonicalHeader          => BlockNumber  => H256);
+/// key: address|shard_id_u64. val: bitmap of blocks w/ change. erigon: AccountsHistory
+table!(AccountHistory           => AccountHistKey => RoaringTreemap);
+/// key: address|slot|shard_id_u64. val: bitmap of blocks w/ change.
+table!(StorageHistory           => StorageHistKey => RoaringTreemap);
+/// key: blocknum. val: address|encode(account)
+dupsort_table!(AccountChangeSet => BlockNumber  => (Address, Account), subkey = Address);
+/// key: blocknum|address|incarnation. val: slot|slot_value
+dupsort_table!(StorageChangeSet => StorageCSKey => (H256, U256), subkey = H256);
+/// key: address. val: encode(account). PlainState table also contains Storage.
+table!(PlainState               => Address      => Account);
+/// key: address|incarnation. val: slot|slot_value (dupsorted). erigon: PlainState
+dupsort_table!(
+    Storage => StorageKey => (H256, U256),
+    subkey = H256,
+    rename = PlainState
+);
+
+/// key: keccak(address). val: encode(account). erigon: HashedAcccounts
+table!(HashedAccount            => H256             => Account);
+//TODO: also dupsorted
+/// key: keccak(address)|incarnation|keccak(slot). val: slot_value
+table!(HashedStorage            => HashStorageKey   => U256);
+/// key: code_hash. val: contract code
+table!(Code                     => H256             => Bytecode);
+/// key: keccak256(address)|incarnation. val: code_hash. erigon: ContractCode
+table!(HashedCodeHash           => ContractCodeKey  => H256);
+/// key: bytestring. val: bytestring. erigon: DatabaseInfo
+table!(DbInfo                   => Bytes            => Bytes);
+/// key: blocknum|blockhash. val: rlp(total_difficulty big.Int). erigon: HeaderTD
+table!(HeadersTotalDifficulty   => HeaderKey        => TotalDifficulty);
+/// key: blocknum. val: total_issued
+table!(Issuance                 => BlockNumber      => U256);
+/// key: bytes("burnt")|bloknum. val: total_burnt. erigon: Issuance
+table!(Burnt                    => BurntKey         => U256, rename = Issuance);
+/// key: code_hash. value: contract_TEVM_code. erigon: ContractTEVMCode. Unused.
+table!(TEVMCode                 => H256             => Bytes);
+
+type Todo = Bytes;
+/// erigon: TrieOfAccounts
+table!(TrieAccount => Todo => Todo);
+/// erigon: TrieOfStorage
+table!(TrieStorage => Todo => Todo);
+/// key: index. val: rlp(tx). transaction. erigon: EthTx
+table!(BlockTransaction => Todo => Todo);
+/// key: index. val: rlp(tx). erigon: NonCanonicalTxs
+table!(NonCanonicalTransaction => Todo => Todo);
+/// key: blocknum. val: cbor(receipt). erigon: Receipts
+table!(Receipt => BlockNumber => Todo);
+/// key: blocknum|log_index_in_tx. val: cbor(log). erigon: Log
+table!(TransactionLog => (BlockNumber, u32) => Todo);
+table!(LogTopicIndex => Todo => Todo);
+table!(LogAddressIndex => Todo => Todo);
+/// key: blocknum|address.
+dupsort_table!(CallTraceSet => Todo => Todo, subkey = Todo);
 
 // The latest header and latest block are stored in their own tables, addressed
 // by a dummy key ("LastHeader" and "LastBlock", respectively). We encode the
@@ -29,58 +108,3 @@ macro_rules! encode_const {
 encode_const!(LastHeader);
 // every query of the LastBlock table takes the same key, "LastBlock"
 encode_const!(LastBlock);
-
-table!(LastHeader               => LastHeader   => H256);
-table!(LastBlock                => LastBlock    => H256);
-table!(IncarnationMap           => Address      => Incarnation);
-table!(BlockTransactionLookup   => H256         => U256);
-table!(PlainState               => Address      => Account);
-table!(HeaderNumber             => H256         => BlockNumber);
-table!(Header                   => HeaderKey    => BlockHeader, SeekKey = BlockNumber);
-table!(BlockBody                => HeaderKey    => BodyForStorage, SeekKey = BlockNumber);
-table!(PlainCodeHash            => PlainCodeKey => H256);
-table!(TxSender                 => HeaderKey    => Vec<Address>);
-// block number => header hash
-table!(CanonicalHeader          => BlockNumber  => H256);
-// Erigon docs refer to a shard_id for AccountHistory and StorageHistory, but this
-// appears just be the block number
-// Erigon also calls AccountHistory AccountsHistory (with an 's') in most places
-table!(AccountHistory => (Address, BlockNumber) => RoaringTreemap);
-dupsort_table!(AccountChangeSet => BlockNumber => (Address, Account), Subkey = Address);
-// block number | address | incarnation => storage_slot | value
-dupsort_table!(StorageChangeSet => (BlockNumber, StorageKey) => (H256, U256), Subkey = H256);
-table!(StorageHistory => StorageHistKey => RoaringTreemap);
-
-// keccak(address) => Account
-table!(HashedAccount => H256 => Account);
-// keccak(address) | incarnation | keccak(storage_key) => storage value
-table!(HashedStorage => HashStorageKey => H256);
-table!(Code => H256 => Bytecode);
-// keccak256(address) | incarnation => code hash
-table!(ContractCode => ContractCodeKey => H256);
-
-// Manually implement the storage table because it overlaps with PlainState
-// (that is, there are two things stored in the table with different key encodings,
-// and our macros are too simple to handle this).
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Storage;
-impl<'tx> crate::kv::traits::Table<'tx> for Storage {
-    type Name = Self;
-    type Key = StorageKey;
-    type SeekKey = StorageKey;
-    type Value = (H256, U256);
-}
-impl DbName for Storage {
-    const NAME: &'static str = "PlainState";
-}
-impl crate::kv::traits::DupSort<'_> for Storage {
-    type Subkey = H256;
-}
-impl crate::kv::traits::DefaultFlags for Storage {
-    type Flags = crate::kv::tables::DupSortFlags;
-}
-impl std::fmt::Display for Storage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Storage (PlainState)")
-    }
-}

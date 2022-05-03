@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![doc = include_str!("../mdbx.md")]
+#![doc = include_str!("../doc/mdbx.md")]
 #![allow(unused_imports)]
 #![allow(unused)]
 pub mod erigon;
@@ -46,20 +46,27 @@ mod tests {
         let env = env_open(path)?;
         let db = Erigon::begin(&env)?;
 
-        let dst: Address = "0xa94f5374Fce5edBC8E2a8697C15331677e6EbF0B"
-            .parse()
-            .unwrap();
-        let contract: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2"
-            .parse()
-            .unwrap();
+        let dst: Address = "0xa94f5374Fce5edBC8E2a8697C15331677e6EbF0B".parse()?;
+        let contract: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2".parse()?;
         let res = db.read_account_hist(contract, 3)?;
 
         let slot = H256::from_low_u64_be(1);
-        let res = db.read_storage_hist(contract, 1, slot, 3)?;
-        let current = db.read_storage(contract, 1, slot)?;
+        let res = db.read_storage_hist(contract, 1, slot, 0)?;
+        let current = db.read_storage(contract, 2, slot)?;
+        dbg!(res);
+        dbg!(current);
+        for read in db.walk_storage(contract, 1)? {
+            let (key, val) = read?;
+            dbg!(key, val);
+        }
 
-        let hash = db.read_head_block_hash()?.unwrap();
+        let hash = db.read_head_header_hash()?.unwrap();
         let num = db.read_header_number(hash)?.unwrap();
+
+        let td = db.read_total_difficulty((num, hash))?.unwrap();
+
+        // let burnt = db.read::<crate::tables::Burnt>(1.into())?.unwrap();
+        // dbg!(burnt);
         Ok(())
     }
 }

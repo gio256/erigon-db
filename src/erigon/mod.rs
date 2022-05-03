@@ -14,10 +14,7 @@ pub mod models;
 pub mod tables;
 mod utils;
 
-use models::{
-    Account, BlockHeader, BlockNumber, BodyForStorage, Bytecode, HeaderKey, Incarnation,
-    PlainCodeKey, Rlp, StorageHistKey, StorageKey,
-};
+use models::*;
 
 pub const NUM_TABLES: usize = 50;
 // https://github.com/ledgerwatch/erigon-lib/blob/625c9f5385d209dc2abfadedf6e4b3914a26ed3e/kv/mdbx/kv_mdbx.go#L154
@@ -102,6 +99,14 @@ impl<'env, K: Mode> Erigon<'env, K> {
         self.read::<Header>(key.into())
     }
 
+    /// Returns header total difficulty
+    pub fn read_total_difficulty(
+        &self,
+        key: impl Into<HeaderKey>,
+    ) -> Result<Option<TotalDifficulty>> {
+        self.read::<HeadersTotalDifficulty>(key.into())
+    }
+
     /// Returns the decoding of the body as stored in the BlockBody table
     pub fn read_body_for_storage(
         &self,
@@ -161,7 +166,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
         inc: impl Into<Incarnation>,
         slot: H256,
     ) -> Result<Option<U256>> {
-        let bucket = StorageKey::new(adr, inc.into());
+        let bucket = StorageKey(adr, inc.into());
         let mut cur = self.cursor::<Storage>()?;
         cur.seek_dup(bucket, slot)
             .map(|kv| kv.and_then(|(k, v)| if k == slot { Some(v) } else { None }))
@@ -174,7 +179,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
         adr: Address,
         inc: impl Into<Incarnation>,
     ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
-        let start_key = StorageKey::new(adr, inc.into());
+        let start_key = StorageKey(adr, inc.into());
         self.cursor::<Storage>()?.walk_dup(start_key)
     }
 
@@ -228,12 +233,14 @@ impl<'env, K: Mode> Erigon<'env, K> {
     ) -> Result<Option<Account>> {
         let block = block.into();
         let mut hist_cur = self.cursor::<AccountHistory>()?;
-        let mut cs_cur = self.cursor::<AccountChangeSet>()?;
-        let (_, bitmap) = hist_cur.seek((adr, block))?.ok_or(eyre!("No value"))?;
+        let (_, bitmap) = hist_cur
+            .seek((adr, block).into())?
+            .ok_or(eyre!("No value"))?;
         let cs_block = match utils::find_gte(bitmap, *block) {
             Some(changeset) => BlockNumber(changeset),
             _ => return Ok(None),
         };
+        let mut cs_cur = self.cursor::<AccountChangeSet>()?;
         if let Some((k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
             if k == adr {
                 // recover the codehash
@@ -259,15 +266,15 @@ impl<'env, K: Mode> Erigon<'env, K> {
     ) -> Result<Option<U256>> {
         let block = block.into();
         let mut hist_cur = self.cursor::<StorageHistory>()?;
-        let mut cs_cur = self.cursor::<StorageChangeSet>()?;
         let (_, bitmap) = hist_cur
-            .seek(StorageHistKey(adr, slot, block))?
+            .seek((adr, slot, block).into())?
             .ok_or(eyre!("No value"))?;
         let cs_block = match utils::find_gte(bitmap, *block) {
             Some(changeset) => BlockNumber(changeset),
             _ => return Ok(None),
         };
-        let cs_key = (cs_block, StorageKey::new(adr, inc.into()));
+        let cs_key = (cs_block, adr, inc).into();
+        let mut cs_cur = self.cursor::<StorageChangeSet>()?;
         if let Some((k, v)) = cs_cur.seek_dup(cs_key, slot)? {
             if k == slot {
                 return Ok(Some(v));
