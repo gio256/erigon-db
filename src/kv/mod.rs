@@ -1,6 +1,6 @@
-use eyre::{eyre, Result};
+use eyre::{Result};
 use mdbx::{
-    DatabaseFlags, EnvironmentKind, NoWriteMap, Transaction, TransactionKind, WriteFlags, RO, RW,
+    DatabaseFlags, EnvironmentKind, NoWriteMap, TransactionKind, WriteFlags, RO, RW,
 };
 use std::{borrow::Cow, path::Path};
 

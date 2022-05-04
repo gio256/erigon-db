@@ -1,6 +1,6 @@
+use bytes::Buf;
 use roaring::RoaringTreemap;
 use tiny_keccak::{Hasher, Keccak};
-use bytes::Buf;
 
 // https://github.com/ledgerwatch/erigon/blob/f9d7cb5ca9e8a135a76ddcb6fa4ee526ea383554/ethdb/bitmapdb/dbutils.go#L313
 pub fn find_gte(map: RoaringTreemap, n: u64) -> Option<u64> {

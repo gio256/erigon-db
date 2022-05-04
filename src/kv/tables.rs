@@ -1,9 +1,8 @@
-use crate::kv::MdbxTx;
 use arrayvec::ArrayVec;
 use derive_more::{Deref, DerefMut};
 use ethereum_types::{Address, H256, U256};
 use eyre::{eyre, Result};
-use mdbx::{DatabaseFlags, NoWriteMap, TransactionKind};
+use mdbx::{DatabaseFlags};
 use roaring::RoaringTreemap;
 use std::{
     convert::AsRef,
@@ -87,7 +86,11 @@ macro_rules! table_without_flags {
 
 #[macro_export]
 macro_rules! table {
-    ($name:ident => $($args:tt)*) => {
+    (
+        $(#[$meta:meta])*
+        $name:ident => $($args:tt)*
+    ) => {
+        $(#[$meta])*
         $crate::table_without_flags!($name => $($args)*);
         impl $crate::kv::traits::DefaultFlags for $name {
             type Flags = $crate::kv::tables::NoFlags;
@@ -232,7 +235,7 @@ impl TableDecode for H256 {
     fn decode(b: &[u8]) -> Result<Self> {
         match b.len() {
             KECCAK_LENGTH => Ok(H256::from_slice(&*b)),
-            other => Err(eyre!("bad")),
+            _ => Err(eyre!("bad")),
         }
     }
 }
@@ -334,7 +337,7 @@ where
 
 impl TableEncode for RoaringTreemap {
     type Encoded = Vec<u8>;
-    fn encode(mut self) -> Self::Encoded {
+    fn encode(self) -> Self::Encoded {
         let mut buf = Vec::with_capacity(self.serialized_size());
         self.serialize_into(&mut buf).unwrap();
         buf

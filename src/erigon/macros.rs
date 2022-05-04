@@ -77,10 +77,15 @@ macro_rules! impl_decode_tuple {
         impl $crate::kv::traits::TableDecode for $name {
             fn decode(b: &[u8]) -> ::eyre::Result<Self> {
                 if b.len() > Self::SIZE {
-                    return Err($crate::kv::tables::TooLong::<{ Self::SIZE }> { got: b.len() }.into());
+                    return Err(
+                        $crate::kv::tables::TooLong::<{ Self::SIZE }> { got: b.len() }.into(),
+                    );
                 }
                 if b.len() < Self::MIN_SIZE {
-                    return Err($crate::kv::tables::TooShort::<{ Self::MIN_SIZE }> { got: b.len() }.into());
+                    return Err($crate::kv::tables::TooShort::<{ Self::MIN_SIZE }> {
+                        got: b.len(),
+                    }
+                    .into());
                 }
                 let remainder = b;
                 ::seq_macro::seq! { N in 0..$n {
@@ -93,7 +98,7 @@ macro_rules! impl_decode_tuple {
                 }}
             }
         }
-    }
+    };
 }
 pub(crate) use impl_decode_tuple;
 
@@ -119,11 +124,6 @@ macro_rules! tuple_key {
     };
 }
 pub(crate) use tuple_key;
-
-// tuple_key!(Foo(u8, u32, u64));
-use crate::erigon::models::BlockNumber;
-use ethereum_types::H256;
-tuple_key!(HKey(BlockNumber, H256));
 
 macro_rules! bytes_wrapper {
     ($name:ident($t:ty)) => {

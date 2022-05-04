@@ -1,27 +1,18 @@
 use crate::kv::{
-    tables::TableHandle,
     traits::{DefaultFlags, Mode, Table},
     EnvFlags, MdbxCursor, MdbxEnv, MdbxTx,
 };
-use ethereum_types::{Address, H256, H64, U256};
+use ethereum_types::{Address, H256, U256};
 use eyre::{eyre, Result};
-use fastrlp::{Decodable, Encodable};
 use mdbx::{TransactionKind, RO, RW};
 
-// mod foo {
-//     macro_rules! bar { () => () }
-//     pub(crate) use bar;
-// }
 mod macros;
-// macros::bar!();
-
-
 pub mod models;
 pub mod tables;
 mod utils;
 
-use tables::*;
 use models::*;
+use tables::*;
 
 pub const NUM_TABLES: usize = 50;
 // https://github.com/ledgerwatch/erigon-lib/blob/625c9f5385d209dc2abfadedf6e4b3914a26ed3e/kv/mdbx/kv_mdbx.go#L154

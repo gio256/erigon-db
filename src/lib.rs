@@ -1,7 +1,5 @@
 #![doc = include_str!("../README.md")]
 #![doc = include_str!("../doc/mdbx.md")]
-#![allow(unused_imports)]
-#![allow(unused)]
 pub mod erigon;
 pub mod kv;
 pub use erigon::*;
@@ -10,11 +8,10 @@ pub use erigon::*;
 mod tests {
     use super::*;
     use crate::{
-        erigon::{models::*, Erigon},
-        kv::{EnvFlags, MdbxEnv},
+        erigon::{Erigon},
+        kv::{MdbxEnv},
     };
     use ethereum_types::*;
-    use fastrlp::*;
     use once_cell::sync::Lazy;
     use std::{path::Path, sync::Arc};
 
@@ -46,9 +43,9 @@ mod tests {
         let env = env_open(path)?;
         let db = Erigon::begin(&env)?;
 
-        let dst: Address = "0xa94f5374Fce5edBC8E2a8697C15331677e6EbF0B".parse()?;
+        let _dst: Address = "0xa94f5374Fce5edBC8E2a8697C15331677e6EbF0B".parse()?;
         let contract: Address = "0x0d4c6c6605a729a379216c93e919711a081beba2".parse()?;
-        let res = db.read_account_hist(contract, 3)?;
+        let _res = db.read_account_hist(contract, 3)?;
 
         let slot = H256::from_low_u64_be(1);
         let res = db.read_storage_hist(contract, 1, slot, 0)?;

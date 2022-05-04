@@ -1,7 +1,6 @@
 use bytes::{Buf, Bytes};
-use derive_more::{Deref, DerefMut};
 use ethereum_types::{Address, Bloom, H256, H64, U256};
-use eyre::{eyre, Result};
+use eyre::{Result};
 use fastrlp::{
     BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpMaxEncodedLen,
@@ -10,9 +9,9 @@ use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    erigon::{utils::*, macros::*},
+    erigon::{macros::*, utils::*},
     kv::{
-        tables::{TooLong, TooShort, VariableVec},
+        tables::{VariableVec},
         traits::{TableDecode, TableEncode},
     },
 };
@@ -65,11 +64,7 @@ impl ContractCodeKey {
 tuple_key!(HashStorageKey(H256, Incarnation, H256));
 impl HashStorageKey {
     pub fn new(who: Address, inc: impl Into<Incarnation>, key: H256) -> Self {
-        Self(
-            keccak256(who).into(),
-            inc.into(),
-            keccak256(key).into(),
-        )
+        Self(keccak256(who).into(), inc.into(), keccak256(key).into())
     }
 }
 
@@ -91,7 +86,20 @@ impl TableEncode for BurntKey {
 bytes_wrapper!(Rlp(Bytes));
 bytes_wrapper!(Bytecode(Bytes));
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize, Serialize, Encode, Decode, RlpEncodable, RlpDecodable)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    Deserialize,
+    Serialize,
+    Encode,
+    Decode,
+    RlpEncodable,
+    RlpDecodable,
+)]
 pub struct Account {
     pub nonce: u64,
     pub incarnation: Incarnation,
@@ -171,7 +179,6 @@ impl Account {
         self
     }
 }
-
 
 ////
 
@@ -586,6 +593,7 @@ u64_wrapper!(Incarnation);
 crate::u64_table_object!(BlockNumber);
 crate::u64_table_object!(Incarnation);
 
+#[allow(unused)]
 macro_rules! h256_wrapper {
     ($ty:ident) => {
         #[derive(

@@ -1,5 +1,5 @@
 ### Overview
-Fully typed access to [Erigon](https://github.com/ledgerwatch/erigon)'s mdbx database in rust.
+Fully typed access to the [Erigon](https://github.com/ledgerwatch/erigon) database in rust.
 
 ```rust
 use erigon_db::{Erigon, env_open};

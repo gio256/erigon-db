@@ -1,11 +1,11 @@
 # MDBX primer
-An mdbx interaction can be thought of in three levels of abstraction: one environment, one or more transactions, then one or more databases and cursors.
+An mdbx interaction can be thought of in three layers: one environment, one or more transactions, then one or more databases and/or cursors.
 
 #### Environment
 Opening an environment opens or creates the storage file, manages file locks, and initializes the specified configuration. You should be careful not to open the same mdbx environment more than once from the same process. If your process needs to access the database from multiple threads, you must share the same environment between them or mdbx will return `MDBX_BUSY`.
 
 #### Transactions
-From an environment, you create a transaction. Note that a transaction is needed even for read-only access in order to ensure a consistent view of the data. A read-write transaction must be committed to flush changes to the db, but Drop impls take care of this for us in rust.
+From an environment, you create a transaction. Note that a transaction is needed even for read-only access in order to ensure a consistent view of the data. A read-write transaction must be committed to flush changes to the db, but `Drop` impls take care of this for us in rust.
 
 The rust bindings this crate uses to interact with mdbx set [`MDBX_NOTLS`](https://github.com/vorot93/libmdbx-rs/blob/b69d3d988ad7afaa4070c83480b0b48572f93929/src/flags.rs#L158) by default, which prevents issues with opening multiple transactions across process-managed threads or passing read-only transactions across OS threads. However, you should in general avoid opening overlapping transactions on the same thread or sending a read-write transaction across threads. Also be wary of long-running read transactions, as they can create database bloat and impact performance.
 
