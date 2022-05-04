@@ -45,3 +45,5 @@ These abstractions are extremely high-quality in my opinion, so the primary modi
 - Erigon has an excellent [doc](https://github.com/ledgerwatch/erigon/blob/devel/docs/programmers_guide/db_walkthrough.MD) walking through their database layout, though it may not match the current implementation in some places.
 - Erigon's [`core/rawdb/accessors_*.go`](https://github.com/ledgerwatch/erigon/blob/f9d7cb5ca9e8a135a76ddcb6fa4ee526ea383554/core/rawdb/accessors_chain.go#L39) contains many of their low-level database interactions.
 - Some [comments](https://github.com/ledgerwatch/erigon/blob/devel/docs/programmers_guide/db_faq.md) from Erigon on the advisability of this endeavor.
+- For some brief info on mdbx, see [doc/mdbx.md](./doc/mdbx.md).
+- The Erigon database layout is defined in [src/erigon/tables.rs](./src/erigon/tables.rs), and you can see how these tables are read in [src/erigon/mod.rs](./src/erigon/mod.rs).
