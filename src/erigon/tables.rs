@@ -11,9 +11,9 @@ use roaring::RoaringTreemap;
 
 // Table name                   => Key          => Value
 // key: bytes("LastHeader"). val: hash of current canonical head header. erigon: HeadHeaderKey
-table!(LastHeader               => LastHeader   => H256);
+table!(LastHeader               => LastHeaderKey => H256);
 // key: bytes("LastBlock"). val: hash of current canonical head block. erigon: HeadBlockKey
-table!(LastBlock                => LastBlock    => H256);
+table!(LastBlock                => LastBlockKey => H256);
 // key: address. val: incarnation of account when it was last deleted
 table!(IncarnationMap           => Address      => Incarnation);
 // key: tx_hash. val: blocknum containing the tx. erigon: TxLookup
@@ -84,8 +84,3 @@ table!(LogTopicIndex => Todo => Todo);
 table!(LogAddressIndex => Todo => Todo);
 // key: blocknum|address.
 dupsort_table!(CallTraceSet => Todo => Todo, subkey = Todo);
-
-// every query of the LastHeader table takes the same key, "LastHeader"
-macros::constant_key!(LastHeader);
-// every query of the LastBlock table takes the same key, "LastBlock"
-macros::constant_key!(LastBlock);

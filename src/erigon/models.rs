@@ -24,6 +24,11 @@ pub const EMPTY_HASH: H256 = H256(hex_literal::hex!(
     "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
 ));
 
+// every query of the LastHeader table takes the same key, bytes("LastHeader")
+constant_key!(LastHeaderKey, LastHeader);
+// every query of the LastBlock table takes the same key, bytes("LastBlock")
+constant_key!(LastBlockKey, LastBlock);
+
 // blocknum|blockhash
 tuple_key!(HeaderKey(BlockNumber, H256));
 tuple_key!(AccountHistKey(Address, BlockNumber));

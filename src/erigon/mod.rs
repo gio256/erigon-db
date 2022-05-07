@@ -69,12 +69,12 @@ impl<'env, K: Mode> Erigon<'env, K> {
 
     /// Returns the hash of the current canonical head header.
     pub fn read_head_header_hash(&self) -> Result<Option<H256>> {
-        self.read::<LastHeader>(LastHeader)
+        self.read::<LastHeader>(LastHeaderKey)
     }
 
     /// Returns the hash of the current canonical head block.
     pub fn read_head_block_hash(&self) -> Result<Option<H256>> {
-        self.read::<LastBlock>(LastBlock)
+        self.read::<LastBlock>(LastBlockKey)
     }
 
     /// Returns the incarnation of the account when it was last deleted.
@@ -292,10 +292,10 @@ impl<'env> Erigon<'env, mdbx::RW> {
     }
 
     pub fn write_head_header_hash(&self, v: H256) -> Result<()> {
-        self.write::<LastHeader>(LastHeader, v)
+        self.write::<LastHeader>(LastHeaderKey, v)
     }
     pub fn write_head_block_hash(&self, v: H256) -> Result<()> {
-        self.write::<LastBlock>(LastBlock, v)
+        self.write::<LastBlock>(LastBlockKey, v)
     }
     pub fn write_incarnation(&self, k: Address, v: Incarnation) -> Result<()> {
         self.write::<IncarnationMap>(k, v)

@@ -158,6 +158,9 @@ pub(crate) use bytes_wrapper;
 
 macro_rules! constant_key {
     ($name:ident, $encoded:ident) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct $name;
+
         impl $crate::kv::traits::TableEncode for $name {
             type Encoded = Vec<u8>;
             fn encode(self) -> Self::Encoded {
