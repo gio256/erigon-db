@@ -24,7 +24,6 @@ eyre = "0.6.5"
 ethereum-types = { version = "0.13", features = ["codec"] }
 hex-literal = "0.3"
 mdbx = { package = "libmdbx", version = "0.1" }
-parity-scale-codec = { version = "3", features = ["bytes"] }
 fastrlp = { version = "0.1", features = [
     "derive",
     "ethereum-types",

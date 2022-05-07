@@ -10,8 +10,6 @@ macro_rules! declare_tuple {
             ::derive_more::From,
             ::serde::Serialize,
             ::serde::Deserialize,
-            ::parity_scale_codec::Encode,
-            ::parity_scale_codec::Decode,
             ::fastrlp::RlpEncodable,
             ::fastrlp::RlpDecodable,
         )]
@@ -137,8 +135,6 @@ macro_rules! bytes_wrapper {
             ::derive_more::DerefMut,
             ::serde::Serialize,
             ::serde::Deserialize,
-            ::parity_scale_codec::Encode,
-            ::parity_scale_codec::Decode,
             ::fastrlp::RlpEncodable,
             ::fastrlp::RlpDecodable,
         )]
