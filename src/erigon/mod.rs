@@ -173,14 +173,16 @@ impl<'env, K: Mode> Erigon<'env, K> {
     }
 
     /// Returns an iterator over all of the storage (key, value) pairs for the
-    /// given address and account incarnation.
+    /// given address and account incarnation. If a start_slot is provided, the
+    /// iterator will begin at the smallest slot >= start_slot.
     pub fn walk_storage(
         &self,
         adr: Address,
         inc: impl Into<Incarnation>,
+        start_slot: Option<H256>,
     ) -> Result<impl Iterator<Item = Result<(H256, U256)>>> {
-        let start_key = StorageKey(adr, inc.into());
-        self.cursor::<Storage>()?.walk_dup(start_key)
+        let key = StorageKey(adr, inc.into());
+        self.cursor::<Storage>()?.walk_dup(key, start_slot.unwrap_or_default())
     }
 
     /// Returns the code associated with the given codehash.

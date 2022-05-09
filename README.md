@@ -24,7 +24,7 @@ fn main() -> eyre::Result<()> {
 
     // get all of the contract's populated storage slots
     // (incarnation is an Erigon-specific value related to removal/revival of contracts)
-    for read in db.walk_storage(contract, account.incarnation)? {
+    for read in db.walk_storage(contract, account.incarnation, None)? {
         let (slot, value) = read?;
         println!("The value at slot {} is {}", slot, value);
     }

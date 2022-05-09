@@ -238,6 +238,7 @@ where
             .transpose()
     }
 
+    /// Returns the first key/value pair in the table
     pub fn first(&mut self) -> Result<Option<(T::Key, T::Value)>>
     where
         T::Key: TableDecode,
@@ -248,10 +249,44 @@ where
             .transpose()
     }
 
+    /// Returns the first value in the table without attempting to decode the returned key.
+    pub fn first_val(&mut self) -> Result<Option<T::Value>> {
+        self.inner
+            .first::<Cow<_>, Cow<_>>()?
+            .map(|(_, v)| T::Value::decode(&v))
+            .transpose()
+    }
+
+    pub fn next(&mut self) -> Result<Option<(T::Key, T::Value)>>
+    where
+        T::Key: TableDecode,
+    {
+        self.inner
+            .next::<Cow<_>, Cow<_>>()?
+            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
+            .transpose()
+    }
+
+    /// Returns an owned iterator over (key, value) pairs beginning at start_key.
+    pub fn walk(
+        mut self,
+        start_key: T::Key,
+    ) -> Result<impl Iterator<Item = Result<(<T as Table<'tx>>::Key, <T as Table<'tx>>::Value)>>>
+    where
+        T::Key: TableDecode,
+    {
+        let first = self
+            .inner
+            .set_range::<Cow<_>, Cow<_>>(start_key.encode().as_ref())?
+            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)));
+
+        Ok(Walker { cur: self, first })
+    }
+
     /// Returns an iterator over (key, value) pairs beginning at start_key. If the table
     /// is dupsorted (contains duplicate items for each key), all of the duplicates
     /// at a given key will be returned before moving on to the next key.
-    pub fn walk(
+    pub fn iter(
         &mut self,
         start_key: T::Key,
     ) -> impl Iterator<Item = Result<(<T as Table<'tx>>::Key, <T as Table<'tx>>::Value)>> + '_
@@ -270,7 +305,7 @@ where
     /// to decode the returned keys (only the values). If the table is dupsorted
     /// (contains duplicate items for each key), all of the duplicates at a
     /// given key will be returned before moving on to the next key.
-    pub fn walk_values(
+    pub fn iter_val(
         &mut self,
         start_key: T::Key,
     ) -> impl Iterator<Item = Result<<T as Table<'tx>>::Value>> + '_ {
@@ -321,23 +356,24 @@ where
     /// to decode the table key. Note that the value returned includes the
     /// subkey prefix, meaning you likely want to decode it into
     /// `(subkey, value_at_subkey)`.
-    pub fn next_dup_value(&mut self) -> Result<Option<T::Value>> {
+    pub fn next_dup_val(&mut self) -> Result<Option<T::Value>> {
         self.inner
             .next_dup::<Cow<_>, Cow<_>>()?
             .map(|(_, v)| T::Value::decode(&v))
             .transpose()
     }
 
-    /// Returns an iterator over duplicate values for the given key. Note that
-    /// the values returned include the subkey prefix, meaning you likely want
-    /// to decode them into `(subkey, value_at_subkey)`.
+    /// Returns an owned iterator over duplicate values for the given key. Note
+    /// that the values returned include the subkey prefix, meaning you likely
+    /// want to decode them into `(subkey, value_at_subkey)`.
     pub fn walk_dup(
         mut self,
-        start_key: T::Key,
+        key: T::Key,
+        subkey: T::Subkey,
     ) -> Result<impl Iterator<Item = Result<<T as Table<'tx>>::Value>>> {
         let first = self
             .inner
-            .set::<Cow<_>>(start_key.encode().as_ref())?
+            .get_both_range::<Cow<_>>(key.encode().as_ref(), subkey.encode().as_ref())?
             .map(|cow_val| T::Value::decode(&cow_val));
 
         Ok(DupWalker { cur: self, first })
@@ -369,6 +405,36 @@ where
         if first.is_some() {
             return first;
         }
-        self.cur.next_dup_value().transpose()
+        self.cur.next_dup_val().transpose()
+    }
+}
+
+/// An internal struct for turning a cursor to a table into an iterator
+/// over key/value pairs in that table.
+///
+/// See [Akula](https://github.com/akula-bft/akula/blob/1800ac77b979d410bea5ff3bcd2617cb302d66fe/src/kv/mdbx.rs#L319)
+/// for a much more interesting approach using generators.
+struct Walker<'tx, K, T>
+where
+    K: TransactionKind,
+    T: Table<'tx>,
+{
+    pub cur: MdbxCursor<'tx, K, T>,
+    pub first: Option<Result<(T::Key, T::Value)>>,
+}
+
+impl<'tx, K, T> std::iter::Iterator for Walker<'tx, K, T>
+where
+    K: TransactionKind,
+    T: Table<'tx>,
+    T::Key: TableDecode,
+{
+    type Item = Result<(T::Key, T::Value)>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let first = self.first.take();
+        if first.is_some() {
+            return first;
+        }
+        self.cur.next().transpose()
     }
 }
