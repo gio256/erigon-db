@@ -1,7 +1,5 @@
-use eyre::{Result};
-use mdbx::{
-    DatabaseFlags, EnvironmentKind, NoWriteMap, TransactionKind, WriteFlags, RO, RW,
-};
+use eyre::Result;
+use mdbx::{DatabaseFlags, EnvironmentKind, NoWriteMap, TransactionKind, WriteFlags, RO, RW};
 use std::{borrow::Cow, path::Path};
 
 pub mod tables;
@@ -236,6 +234,16 @@ where
     {
         self.inner
             .set_range::<Cow<_>, Cow<_>>(key.encode().as_ref())?
+            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
+            .transpose()
+    }
+
+    pub fn first(&mut self) -> Result<Option<(T::Key, T::Value)>>
+    where
+        T::Key: TableDecode,
+    {
+        self.inner
+            .first::<Cow<_>, Cow<_>>()?
             .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
             .transpose()
     }

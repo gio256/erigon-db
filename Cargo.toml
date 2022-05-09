@@ -53,6 +53,7 @@ hex = { version = "0.4.3", default-features = false, features = ["std"] }
 
 [features]
 txgen = ["tokio", "ethers", "hex", "paste"]
+ethers-types = ["ethers"]
 
 [patch.crates-io]
 libmdbx = { git = "https://github.com/gio256/libmdbx-rs", branch = "develop" }

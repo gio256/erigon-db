@@ -369,7 +369,6 @@ impl TableDecode for Vec<Address> {
 
 // -- macros from Akula, largely unaltered
 
-
 u64_wrapper!(BlockNumber);
 u64_table_key!(BlockNumber);
 

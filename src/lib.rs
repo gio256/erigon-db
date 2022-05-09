@@ -7,10 +7,7 @@ pub use erigon::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        erigon::{Erigon},
-        kv::{MdbxEnv},
-    };
+    use crate::{erigon::Erigon, kv::MdbxEnv};
     use ethereum_types::*;
     use once_cell::sync::Lazy;
     use std::{path::Path, sync::Arc};
