@@ -24,14 +24,14 @@ constant_key!(LastHeaderKey, LastHeader);
 // the LastBlock table stores only one key, bytes("LastBlock")
 constant_key!(LastBlockKey, LastBlock);
 
-// blocknum|blockhash
+// blocknum||blockhash
 tuple_key!(HeaderKey(BlockNumber, H256));
 tuple_key!(AccountHistKey(Address, BlockNumber));
 tuple_key!(StorageKey(Address, Incarnation));
 
-// slot|value
+// slot||value
 tuple_key!(StorageCSVal(H256, U256));
-// blocknum|address|incarnation
+// blocknum||address||incarnation
 tuple_key!(StorageCSKey(BlockNumber, StorageKey));
 impl<B, A, I> From<(B, A, I)> for StorageCSKey
 where
@@ -43,15 +43,15 @@ where
     }
 }
 
-// address|encode(account)
+// address||encode(account)
 tuple_key!(AccountCSVal(Address, Account));
 
-// address|storage_slot|block_number
+// address||storage_slot||block_number
 tuple_key!(StorageHistKey(Address, H256, BlockNumber));
-// address|incarnation
+// address||incarnation
 tuple_key!(PlainCodeKey(Address, Incarnation));
 
-// keccak(address)|incarnation
+// keccak(address)||incarnation
 tuple_key!(ContractCodeKey(H256, Incarnation));
 impl ContractCodeKey {
     pub fn make(who: Address, inc: impl Into<Incarnation>) -> Self {
@@ -59,7 +59,7 @@ impl ContractCodeKey {
     }
 }
 
-// keccak(address)|incarnation|keccak(storage_key)
+// keccak(address)||incarnation||keccak(storage_key)
 tuple_key!(HashStorageKey(H256, Incarnation, H256));
 impl HashStorageKey {
     pub fn make(who: Address, inc: impl Into<Incarnation>, key: H256) -> Self {
@@ -68,7 +68,7 @@ impl HashStorageKey {
 }
 
 // The Issuance table also stores the amount burnt, prefixing the encoded block number with "burnt"
-// bytes("burnt")|blocknum
+// bytes("burnt")||blocknum
 declare_tuple!(BurntKey(BlockNumber));
 size_tuple!(BurntKey(BlockNumber));
 impl TableEncode for BurntKey {
@@ -369,16 +369,6 @@ impl TableDecode for Vec<Address> {
 
 // -- macros from Akula, largely unaltered
 
-macro_rules! impl_from {
-    ($type:ty, $other:ty) => {
-        impl From<$type> for $other {
-            #[inline(always)]
-            fn from(x: $type) -> $other {
-                x.0 as $other
-            }
-        }
-    };
-}
 
 u64_wrapper!(BlockNumber);
 u64_table_key!(BlockNumber);
