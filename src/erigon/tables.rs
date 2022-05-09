@@ -1,6 +1,9 @@
 use crate::{
     dupsort_table,
-    erigon::{macros, models::*},
+    erigon::{
+        macros,
+        models::{transaction::Transaction, *},
+    },
     table,
 };
 use bytes::Bytes;
@@ -73,9 +76,9 @@ table!(TrieAccount => Todo => Todo);
 // erigon: TrieOfStorage
 table!(TrieStorage => Todo => Todo);
 // key: index. val: rlp(tx). transaction. erigon: EthTx
-table!(BlockTransaction => Todo => Todo);
+table!(BlockTransaction => TxIndex => Transaction);
 // key: index. val: rlp(tx). erigon: NonCanonicalTxs
-table!(NonCanonicalTransaction => Todo => Todo);
+table!(NonCanonicalTransaction => TxIndex => Transaction);
 // key: blocknum. val: cbor(receipt). erigon: Receipts
 table!(Receipt => BlockNumber => Todo);
 // key: blocknum|log_index_in_tx. val: cbor(log). erigon: Log

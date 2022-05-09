@@ -11,6 +11,8 @@ pub mod models;
 pub mod tables;
 mod utils;
 
+use utils::consts as C;
+
 use models::*;
 use tables::*;
 
@@ -183,7 +185,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
 
     /// Returns the code associated with the given codehash.
     pub fn read_code(&self, codehash: H256) -> Result<Option<Bytecode>> {
-        if codehash == models::EMPTY_HASH {
+        if codehash == C::EMPTY_HASH {
             return Ok(Default::default());
         }
         self.read::<Code>(codehash)
@@ -242,7 +244,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
         if let Some(AccountCSVal(k, mut acct)) = cs_cur.seek_dup(cs_block, adr)? {
             if k == adr {
                 // recover the codehash
-                if acct.incarnation > 0 && acct.codehash == Default::default() {
+                if *acct.incarnation > 0 && acct.codehash == Default::default() {
                     acct.codehash = self
                         .read_codehash(adr, acct.incarnation)?
                         .ok_or(eyre!("No value"))?
@@ -252,6 +254,7 @@ impl<'env, K: Mode> Erigon<'env, K> {
         }
         Ok(None)
     }
+
 
     /// Returns the value of an address's storage at the given block number. Returns `None` if the state
     /// is not found in history (e.g., if it's in the PlainState table instead).

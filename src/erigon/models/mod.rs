@@ -1,6 +1,6 @@
 use bytes::{Buf, Bytes};
 use ethereum_types::{Address, Bloom, H256, H64, U256};
-use eyre::{Result};
+use eyre::Result;
 use fastrlp::{
     BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpMaxEncodedLen,
@@ -10,23 +10,18 @@ use serde::{Deserialize, Serialize};
 use crate::{
     erigon::{macros::*, utils::*},
     kv::{
-        tables::{VariableVec},
+        tables::VariableVec,
         traits::{TableDecode, TableEncode},
     },
 };
 
-pub const KECCAK_LENGTH: usize = H256::len_bytes();
-pub const ADDRESS_LENGTH: usize = Address::len_bytes();
-pub const U64_LENGTH: usize = std::mem::size_of::<u64>();
-pub const BLOOM_BYTE_LENGTH: usize = 256;
-// keccak256("")
-pub const EMPTY_HASH: H256 = H256(hex_literal::hex!(
-    "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-));
+pub mod transaction;
 
-// every query of the LastHeader table takes the same key, bytes("LastHeader")
+use crate::erigon::utils::consts::*;
+
+// the LastHeader table stores only one key, bytes("LastHeader")
 constant_key!(LastHeaderKey, LastHeader);
-// every query of the LastBlock table takes the same key, bytes("LastBlock")
+// the LastBlock table stores only one key, bytes("LastBlock")
 constant_key!(LastBlockKey, LastBlock);
 
 // blocknum|blockhash
@@ -59,7 +54,7 @@ tuple_key!(PlainCodeKey(Address, Incarnation));
 // keccak(address)|incarnation
 tuple_key!(ContractCodeKey(H256, Incarnation));
 impl ContractCodeKey {
-    pub fn new(who: Address, inc: impl Into<Incarnation>) -> Self {
+    pub fn make(who: Address, inc: impl Into<Incarnation>) -> Self {
         Self(keccak256(who).into(), inc.into())
     }
 }
@@ -67,7 +62,7 @@ impl ContractCodeKey {
 // keccak(address)|incarnation|keccak(storage_key)
 tuple_key!(HashStorageKey(H256, Incarnation, H256));
 impl HashStorageKey {
-    pub fn new(who: Address, inc: impl Into<Incarnation>, key: H256) -> Self {
+    pub fn make(who: Address, inc: impl Into<Incarnation>, key: H256) -> Self {
         Self(keccak256(who).into(), inc.into(), keccak256(key).into())
     }
 }
@@ -91,16 +86,7 @@ bytes_wrapper!(Rlp(Bytes));
 bytes_wrapper!(Bytecode(Bytes));
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Deserialize,
-    Serialize,
-    RlpEncodable,
-    RlpDecodable,
+    Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize, Serialize, RlpEncodable, RlpDecodable,
 )]
 pub struct Account {
     pub nonce: u64,
@@ -110,35 +96,35 @@ pub struct Account {
 }
 
 impl TableDecode for Account {
-    fn decode(mut enc: &[u8]) -> Result<Self> {
+    fn decode(mut buf: &[u8]) -> Result<Self> {
         let mut acct = Self::default();
 
-        if enc.is_empty() {
+        if buf.is_empty() {
             return Ok(acct);
         }
 
-        let fieldset = enc.get_u8();
+        let fieldset = buf.get_u8();
 
         // has nonce
         if fieldset & 1 > 0 {
-            acct.nonce = parse_u64_with_len(&mut enc);
+            acct.nonce = take_u64_rlp(&mut buf)?;
         }
 
         // has balance
         if fieldset & 2 > 0 {
-            let bal_len = enc.get_u8();
-            acct.balance = enc[..bal_len.into()].into();
-            enc.advance(bal_len.into());
+            let bal_len = buf.get_u8();
+            acct.balance = buf[..bal_len.into()].into();
+            buf.advance(bal_len.into());
         }
 
         // has incarnation
         if fieldset & 4 > 0 {
-            acct.incarnation = parse_u64_with_len(&mut enc).into();
+            acct.incarnation = take_u64_rlp(&mut buf)?.into();
         }
 
         // has codehash
         if fieldset & 8 > 0 {
-            let len: usize = enc.get_u8().into();
+            let len: usize = buf.get_u8().into();
             if len != KECCAK_LENGTH {
                 eyre::bail!(
                     "codehash should be {} bytes long. Got {} instead",
@@ -146,8 +132,8 @@ impl TableDecode for Account {
                     len
                 );
             }
-            acct.codehash = H256::from_slice(&enc[..KECCAK_LENGTH]);
-            enc.advance(KECCAK_LENGTH)
+            acct.codehash = H256::from_slice(&buf[..KECCAK_LENGTH]);
+            buf.advance(KECCAK_LENGTH)
         }
         Ok(acct)
     }
@@ -184,24 +170,6 @@ impl Account {
 
 ////
 
-macro_rules! rlp_table_value {
-    ($t:ty) => {
-        impl TableEncode for $t {
-            type Encoded = ::bytes::Bytes;
-            fn encode(self) -> Self::Encoded {
-                let mut buf = ::bytes::BytesMut::new();
-                ::fastrlp::Encodable::encode(&self, &mut buf);
-                buf.into()
-            }
-        }
-        impl TableDecode for $t {
-            fn decode(mut b: &[u8]) -> Result<Self> {
-                ::fastrlp::Decodable::decode(&mut b).map_err(From::from)
-            }
-        }
-    };
-}
-
 #[derive(
     Clone,
     Copy,
@@ -226,9 +194,7 @@ macro_rules! rlp_table_value {
 pub struct TotalDifficulty(U256);
 rlp_table_value!(TotalDifficulty);
 
-#[derive(
-    Clone, Debug, PartialEq, Serialize, Deserialize, RlpEncodable, RlpDecodable,
-)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 pub struct BodyForStorage {
     pub base_tx_id: u64,
     pub tx_amount: u32,
@@ -403,101 +369,6 @@ impl TableDecode for Vec<Address> {
 
 // -- macros from Akula, largely unaltered
 
-macro_rules! impl_ops {
-    ($type:ty, $other:ty) => {
-        impl std::ops::Add<$other> for $type {
-            type Output = Self;
-            #[inline(always)]
-            fn add(self, other: $other) -> Self {
-                Self(
-                    self.0
-                        + u64::try_from(other)
-                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
-                )
-            }
-        }
-        impl std::ops::Sub<$other> for $type {
-            type Output = Self;
-            #[inline(always)]
-            fn sub(self, other: $other) -> Self {
-                Self(
-                    self.0
-                        - u64::try_from(other)
-                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
-                )
-            }
-        }
-        impl std::ops::Mul<$other> for $type {
-            type Output = Self;
-            #[inline(always)]
-            fn mul(self, other: $other) -> Self {
-                Self(
-                    self.0
-                        * u64::try_from(other)
-                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
-                )
-            }
-        }
-        impl std::ops::Div<$other> for $type {
-            type Output = Self;
-            #[inline(always)]
-            fn div(self, other: $other) -> Self {
-                Self(
-                    self.0
-                        / u64::try_from(other)
-                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
-                )
-            }
-        }
-        impl std::ops::Rem<$other> for $type {
-            type Output = Self;
-            #[inline(always)]
-            fn rem(self, other: $other) -> Self {
-                Self(
-                    self.0
-                        % u64::try_from(other)
-                            .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() }),
-                )
-            }
-        }
-        impl std::ops::AddAssign<$other> for $type {
-            #[inline(always)]
-            fn add_assign(&mut self, other: $other) {
-                self.0 += u64::try_from(other)
-                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
-            }
-        }
-        impl std::ops::SubAssign<$other> for $type {
-            #[inline(always)]
-            fn sub_assign(&mut self, other: $other) {
-                self.0 -= u64::try_from(other)
-                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
-            }
-        }
-        impl std::ops::MulAssign<$other> for $type {
-            #[inline(always)]
-            fn mul_assign(&mut self, other: $other) {
-                self.0 *= u64::try_from(other)
-                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
-            }
-        }
-        impl std::ops::DivAssign<$other> for $type {
-            #[inline(always)]
-            fn div_assign(&mut self, other: $other) {
-                self.0 /= u64::try_from(other)
-                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
-            }
-        }
-        impl std::ops::RemAssign<$other> for $type {
-            #[inline(always)]
-            fn rem_assign(&mut self, other: $other) {
-                self.0 %= u64::try_from(other)
-                    .unwrap_or_else(|_| unsafe { std::hint::unreachable_unchecked() });
-            }
-        }
-    };
-}
-
 macro_rules! impl_from {
     ($type:ty, $other:ty) => {
         impl From<$type> for $other {
@@ -509,122 +380,11 @@ macro_rules! impl_from {
     };
 }
 
-macro_rules! u64_wrapper {
-    ($ty:ident) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            derive_more::Deref,
-            derive_more::DerefMut,
-            Default,
-            derive_more::Display,
-            Eq,
-            derive_more::From,
-            derive_more::FromStr,
-            PartialEq,
-            PartialOrd,
-            Ord,
-            Hash,
-            Serialize,
-            Deserialize,
-            RlpEncodable,
-            RlpDecodableWrapper,
-            RlpMaxEncodedLen,
-        )]
-        #[serde(transparent)]
-        #[repr(transparent)]
-        pub struct $ty(pub u64);
-
-        impl PartialOrd<usize> for $ty {
-            #[inline(always)]
-            fn partial_cmp(&self, other: &usize) -> Option<std::cmp::Ordering> {
-                self.0.partial_cmp(&(*other as u64))
-            }
-        }
-        impl PartialEq<usize> for $ty {
-            #[inline(always)]
-            fn eq(&self, other: &usize) -> bool {
-                self.0 == *other as u64
-            }
-        }
-        impl std::ops::Add<i32> for $ty {
-            type Output = Self;
-            #[inline(always)]
-            fn add(self, other: i32) -> Self {
-                Self(self.0 + u64::try_from(other).unwrap())
-            }
-        }
-
-        impl_from!($ty, u64);
-        impl_from!($ty, usize);
-
-        impl_ops!($ty, u8);
-        impl_ops!($ty, u64);
-        impl_ops!($ty, usize);
-        impl_ops!($ty, $ty);
-    };
-}
-
 u64_wrapper!(BlockNumber);
+u64_table_key!(BlockNumber);
+
 u64_wrapper!(Incarnation);
-crate::u64_table_object!(BlockNumber);
-crate::u64_table_object!(Incarnation);
+u64_table_key!(Incarnation);
 
-#[allow(unused)]
-macro_rules! h256_wrapper {
-    ($ty:ident) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            derive_more::Deref,
-            derive_more::DerefMut,
-            Default,
-            derive_more::Display,
-            Eq,
-            derive_more::From,
-            derive_more::FromStr,
-            PartialEq,
-            PartialOrd,
-            Ord,
-            Hash,
-            Serialize,
-            Deserialize,
-            RlpEncodable,
-            RlpDecodableWrapper,
-            RlpMaxEncodedLen,
-        )]
-        #[serde(transparent)]
-        #[repr(transparent)]
-        pub struct $ty(pub ethereum_types::H256);
-
-        impl PartialOrd<usize> for $ty {
-            #[inline(always)]
-            fn partial_cmp(&self, other: &usize) -> Option<std::cmp::Ordering> {
-                self.0.partial_cmp(&(*other as u64))
-            }
-        }
-        impl PartialEq<usize> for $ty {
-            #[inline(always)]
-            fn eq(&self, other: &usize) -> bool {
-                self.0 == *other as u64
-            }
-        }
-        impl std::ops::Add<i32> for $ty {
-            type Output = Self;
-            #[inline(always)]
-            fn add(self, other: i32) -> Self {
-                Self(self.0 + u64::try_from(other).unwrap())
-            }
-        }
-
-        impl_from!($ty, u64);
-        impl_from!($ty, usize);
-
-        impl_ops!($ty, u8);
-        impl_ops!($ty, u64);
-        impl_ops!($ty, usize);
-        impl_ops!($ty, $ty);
-    };
-}
+u64_wrapper!(TxIndex);
+u64_table_key!(TxIndex);

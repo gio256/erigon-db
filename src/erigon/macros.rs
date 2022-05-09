@@ -123,21 +123,72 @@ macro_rules! tuple_key {
 }
 pub(crate) use tuple_key;
 
+macro_rules! constant_key {
+    ($name:ident, $encoded:ident) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct $name;
+
+        impl $crate::kv::traits::TableEncode for $name {
+            type Encoded = Vec<u8>;
+            fn encode(self) -> Self::Encoded {
+                String::from(stringify!($encoded)).into_bytes()
+            }
+        }
+    };
+    ($name:ident) => {
+        $crate::erigon::macros::constant_key!($name, $name);
+    };
+}
+pub(crate) use constant_key;
+
+/// Implements TableEncode and TableDecode for any value that is stored rlp encoded
+macro_rules! rlp_table_value {
+    ($t:ty) => {
+        impl $crate::kv::traits::TableEncode for $t {
+            type Encoded = ::bytes::Bytes;
+            fn encode(self) -> Self::Encoded {
+                let mut buf = ::bytes::BytesMut::new();
+                ::fastrlp::Encodable::encode(&self, &mut buf);
+                buf.into()
+            }
+        }
+        impl $crate::kv::traits::TableDecode for $t {
+            fn decode(mut b: &[u8]) -> ::eyre::Result<Self> {
+                ::fastrlp::Decodable::decode(&mut b).map_err(From::from)
+            }
+        }
+    };
+}
+pub(crate) use rlp_table_value;
+
+macro_rules! impl_from {
+    ($type:ty, $other:ty) => {
+        impl From<$type> for $other {
+            #[inline(always)]
+            fn from(x: $type) -> $other {
+                x.0 as $other
+            }
+        }
+    };
+}
+pub(crate) use impl_from;
+
 macro_rules! bytes_wrapper {
     ($name:ident($t:ty)) => {
         #[derive(
-            Clone,
             Debug,
+            Clone,
             PartialEq,
             Eq,
             Default,
             ::derive_more::Deref,
             ::derive_more::DerefMut,
+            ::derive_more::From,
             ::serde::Serialize,
             ::serde::Deserialize,
-            ::fastrlp::RlpEncodable,
-            ::fastrlp::RlpDecodable,
         )]
+        #[serde(transparent)]
+        #[repr(transparent)]
         pub struct $name(pub $t);
 
         impl $crate::kv::traits::TableEncode for $name {
@@ -156,20 +207,89 @@ macro_rules! bytes_wrapper {
 }
 pub(crate) use bytes_wrapper;
 
-macro_rules! constant_key {
-    ($name:ident, $encoded:ident) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub struct $name;
+macro_rules! u64_wrapper {
+    ($ty:ident) => {
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            ::derive_more::Deref,
+            ::derive_more::DerefMut,
+            ::derive_more::Display,
+            ::derive_more::From,
+            ::derive_more::FromStr,
+            ::serde::Serialize,
+            ::serde::Deserialize,
+            ::fastrlp::RlpEncodableWrapper,
+            ::fastrlp::RlpDecodableWrapper,
+            ::fastrlp::RlpMaxEncodedLen,
+        )]
+        #[serde(transparent)]
+        #[repr(transparent)]
+        pub struct $ty(pub u64);
 
-        impl $crate::kv::traits::TableEncode for $name {
-            type Encoded = Vec<u8>;
+        $crate::erigon::macros::impl_from!($ty, u64);
+        $crate::erigon::macros::impl_from!($ty, usize);
+    };
+}
+pub(crate) use u64_wrapper;
+
+macro_rules! u64_table_key {
+    ($ty:ident) => {
+        impl $crate::kv::traits::TableEncode for $ty {
+            type Encoded = [u8; 8];
+
             fn encode(self) -> Self::Encoded {
-                String::from(stringify!($encoded)).into_bytes()
+                self.to_be_bytes()
+            }
+        }
+
+        impl $crate::kv::traits::TableDecode for $ty {
+            fn decode(b: &[u8]) -> Result<Self> {
+                match b.len() {
+                    8 => Ok(u64::from_be_bytes(*::arrayref::array_ref!(&*b, 0, 8)).into()),
+                    other => Err($crate::kv::tables::InvalidLength::<8> { got: other }.into()),
+                }
             }
         }
     };
-    ($name:ident) => {
-        $crate::erigon::macros::constant_key!($name, $name);
+}
+pub(crate) use u64_table_key;
+
+macro_rules! u256_wrapper {
+    ($ty:ident) => {
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            ::derive_more::Deref,
+            ::derive_more::DerefMut,
+            ::derive_more::Display,
+            ::derive_more::From,
+            ::derive_more::FromStr,
+            ::serde::Serialize,
+            ::serde::Deserialize,
+            ::fastrlp::RlpEncodableWrapper,
+            ::fastrlp::RlpDecodableWrapper,
+            ::fastrlp::RlpMaxEncodedLen,
+        )]
+        #[serde(transparent)]
+        #[repr(transparent)]
+        pub struct $ty(pub U256);
+
+        $crate::erigon::macros::impl_from!($ty, U256);
     };
 }
-pub(crate) use constant_key;
+pub(crate) use u256_wrapper;

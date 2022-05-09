@@ -2,7 +2,7 @@ use arrayvec::ArrayVec;
 use derive_more::{Deref, DerefMut};
 use ethereum_types::{Address, H256, U256};
 use eyre::{eyre, Result};
-use mdbx::{DatabaseFlags};
+use mdbx::DatabaseFlags;
 use roaring::RoaringTreemap;
 use std::{
     convert::AsRef,
@@ -362,30 +362,6 @@ impl TableDecode for bytes::Bytes {
         Ok(b.to_vec().into())
     }
 }
-
-#[macro_export]
-macro_rules! u64_table_object {
-    ($ty:ident) => {
-        impl $crate::kv::traits::TableEncode for $ty {
-            type Encoded = [u8; 8];
-
-            fn encode(self) -> Self::Encoded {
-                self.to_be_bytes()
-            }
-        }
-
-        impl $crate::kv::traits::TableDecode for $ty {
-            fn decode(b: &[u8]) -> Result<Self> {
-                match b.len() {
-                    8 => Ok(u64::from_be_bytes(*::arrayref::array_ref!(&*b, 0, 8)).into()),
-                    other => Err($crate::kv::tables::InvalidLength::<8> { got: other }.into()),
-                }
-            }
-        }
-    };
-}
-
-u64_table_object!(u64);
 
 impl TableEncode for u32 {
     type Encoded = [u8; 4];
