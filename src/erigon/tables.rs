@@ -1,11 +1,4 @@
-use crate::{
-    dupsort_table,
-    erigon::{
-        macros,
-        models::{transaction::Transaction, *},
-    },
-    table,
-};
+use crate::{dupsort_table, erigon::models::*, table};
 use bytes::Bytes;
 use ethereum_types::{Address, H256, U256};
 use roaring::RoaringTreemap;

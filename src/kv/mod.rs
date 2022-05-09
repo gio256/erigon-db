@@ -161,8 +161,8 @@ impl<'env, K: TransactionKind> MdbxTx<'env, K> {
         F: DbFlags,
     {
         self.inner
-            .get::<Cow<[u8]>>(db.as_ref(), key.encode().as_ref())?
-            .map(|c| T::Value::decode(&c))
+            .get(db.as_ref(), key.encode().as_ref())?
+            .map(decode_one::<T>)
             .transpose()
     }
 
@@ -233,8 +233,8 @@ where
         T::Key: TableDecode,
     {
         self.inner
-            .set_range::<Cow<_>, Cow<_>>(key.encode().as_ref())?
-            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
+            .set_range(key.encode().as_ref())?
+            .map(decode::<T>)
             .transpose()
     }
 
@@ -243,28 +243,19 @@ where
     where
         T::Key: TableDecode,
     {
-        self.inner
-            .first::<Cow<_>, Cow<_>>()?
-            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
-            .transpose()
+        self.inner.first()?.map(decode::<T>).transpose()
     }
 
     /// Returns the first value in the table without attempting to decode the returned key.
     pub fn first_val(&mut self) -> Result<Option<T::Value>> {
-        self.inner
-            .first::<Cow<_>, Cow<_>>()?
-            .map(|(_, v)| T::Value::decode(&v))
-            .transpose()
+        self.inner.first()?.map(decode_val::<T>).transpose()
     }
 
     pub fn next(&mut self) -> Result<Option<(T::Key, T::Value)>>
     where
         T::Key: TableDecode,
     {
-        self.inner
-            .next::<Cow<_>, Cow<_>>()?
-            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
-            .transpose()
+        self.inner.next()?.map(decode::<T>).transpose()
     }
 
     /// Returns an owned iterator over (key, value) pairs beginning at start_key.
@@ -277,8 +268,8 @@ where
     {
         let first = self
             .inner
-            .set_range::<Cow<_>, Cow<_>>(start_key.encode().as_ref())?
-            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)));
+            .set_range(start_key.encode().as_ref())?
+            .map(decode::<T>);
 
         Ok(Walker { cur: self, first })
     }
@@ -294,11 +285,8 @@ where
         T::Key: TableDecode,
     {
         self.inner
-            .iter_from::<Cow<_>, Cow<_>>(&start_key.encode().as_ref())
-            .map(|res| {
-                let (k, v) = res?;
-                Ok((T::Key::decode(&k)?, T::Value::decode(&v)?))
-            })
+            .iter_from(start_key.encode().as_ref())
+            .map(|res| decode::<T>(res?))
     }
 
     /// Returns an iterator over values beginning at start_key, without attempting
@@ -310,11 +298,8 @@ where
         start_key: T::Key,
     ) -> impl Iterator<Item = Result<<T as Table<'tx>>::Value>> + '_ {
         self.inner
-            .iter_from::<Cow<_>, Cow<_>>(&start_key.encode().as_ref())
-            .map(|res| {
-                let (_, v) = res?;
-                T::Value::decode(&v)
-            })
+            .iter_from(start_key.encode().as_ref())
+            .map(|res| decode_val::<T>(res?))
     }
 }
 
@@ -334,8 +319,8 @@ where
     /// the table does not contain a value that begins with the provided subkey.
     pub fn seek_dup(&mut self, key: T::Key, subkey: T::Subkey) -> Result<Option<T::Value>> {
         self.inner
-            .get_both_range::<Cow<[u8]>>(key.encode().as_ref(), subkey.encode().as_ref())?
-            .map(|c| T::Value::decode(&c))
+            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())?
+            .map(decode_one::<T>)
             .transpose()
     }
 
@@ -346,10 +331,7 @@ where
     where
         T::Key: TableDecode,
     {
-        self.inner
-            .next_dup::<Cow<_>, Cow<_>>()?
-            .map(|(k, v)| Ok((T::Key::decode(&k)?, T::Value::decode(&v)?)))
-            .transpose()
+        self.inner.next_dup()?.map(decode::<T>).transpose()
     }
 
     /// Returns the next duplicate value at the current key, without attempting
@@ -357,10 +339,7 @@ where
     /// subkey prefix, meaning you likely want to decode it into
     /// `(subkey, value_at_subkey)`.
     pub fn next_dup_val(&mut self) -> Result<Option<T::Value>> {
-        self.inner
-            .next_dup::<Cow<_>, Cow<_>>()?
-            .map(|(_, v)| T::Value::decode(&v))
-            .transpose()
+        self.inner.next_dup()?.map(decode_val::<T>).transpose()
     }
 
     /// Returns an owned iterator over duplicate values for the given key. Note
@@ -373,11 +352,35 @@ where
     ) -> Result<impl Iterator<Item = Result<<T as Table<'tx>>::Value>>> {
         let first = self
             .inner
-            .get_both_range::<Cow<_>>(key.encode().as_ref(), subkey.encode().as_ref())?
-            .map(|cow_val| T::Value::decode(&cow_val));
+            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())?
+            .map(decode_one::<T>);
 
         Ok(DupWalker { cur: self, first })
     }
+}
+
+// Helper functions, primarily for type inference. These save us from needing
+// to specify the TableObject type we expect from every mdbx function call.
+pub fn decode<'tx, T>(kv: (Cow<'tx, [u8]>, Cow<'tx, [u8]>)) -> Result<(T::Key, T::Value)>
+where
+    T: Table<'tx>,
+    T::Key: TableDecode,
+{
+    Ok((TableDecode::decode(&kv.0)?, TableDecode::decode(&kv.1)?))
+}
+// Decodes only the value, ignoring the returned key.
+pub fn decode_val<'tx, T>(kv: (Cow<'tx, [u8]>, Cow<'tx, [u8]>)) -> Result<T::Value>
+where
+    T: Table<'tx>,
+{
+    TableDecode::decode(&kv.1)
+}
+// Decodes a single value.
+pub fn decode_one<'tx, T>(val: Cow<'tx, [u8]>) -> Result<T::Value>
+where
+    T: Table<'tx>,
+{
+    TableDecode::decode(&val)
 }
 
 /// An internal struct for turning a cursor to a dupsorted table into an iterator

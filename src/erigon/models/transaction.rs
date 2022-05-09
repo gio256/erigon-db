@@ -1,10 +1,6 @@
 use bytes::{Buf, Bytes, BytesMut};
-use derive_more::{Deref, From};
-use ethereum_types::{Address, H256, H64, U256};
-use fastrlp::{
-    BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
-    RlpEncodableWrapper,
-};
+use ethereum_types::{Address, H256, U256};
+use fastrlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
