@@ -49,7 +49,7 @@ mod tests {
         let current = db.read_storage(contract, 2, slot)?;
         dbg!(res);
         dbg!(current);
-        for read in db.walk_storage(contract, 1)? {
+        for read in db.walk_storage(contract, 1, None)? {
             let (key, val) = read?;
             dbg!(key, val);
         }

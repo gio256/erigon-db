@@ -16,6 +16,7 @@ use crate::{
 };
 
 pub mod transaction;
+pub use transaction::Transaction;
 
 use crate::erigon::utils::consts::*;
 

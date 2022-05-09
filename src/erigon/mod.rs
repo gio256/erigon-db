@@ -199,6 +199,22 @@ impl<'env, K: Mode> Erigon<'env, K> {
         self.read::<PlainCodeHash>(key)
     }
 
+    pub fn walk_txs_canonical(
+        &self,
+        start_key: Option<TxIndex>,
+    ) -> Result<impl Iterator<Item = Result<(TxIndex, Transaction)>>> {
+        self.cursor::<BlockTransaction>()?
+            .walk(start_key.unwrap_or_default())
+    }
+
+    pub fn walk_txs_noncanonical(
+        &self,
+        start_key: Option<TxIndex>,
+    ) -> Result<impl Iterator<Item = Result<(TxIndex, Transaction)>>> {
+        self.cursor::<NonCanonicalTransaction>()?
+            .walk(start_key.unwrap_or_default())
+    }
+
     // The `AccountChangeSet` table at block `N` stores the state of all accounts
     // changed in block `N` *before* block `N` changed them.
     //

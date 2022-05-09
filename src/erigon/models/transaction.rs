@@ -14,6 +14,10 @@ use crate::erigon::{
 };
 
 // https://github.com/akula-bft/akula/blob/e5af0ab9cea24c7ff4713b1e61c60a918abc6fef/src/models/transaction.rs#L41
+/// The `to` address in an rlp-encoded transaction is either the 1-byte encoded length
+/// of the string (0x80 + 0x14 bytes = 0x94), or it is the 1-byte encoded length of
+/// the empty string (0x80) if the transaction is creating a contract. TxAction
+/// is used to implement this encoding/decoding scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TxAction {
     Call(Address),
@@ -211,89 +215,89 @@ impl Encodable for Transaction {
 }
 
 impl Transaction {
-    fn tx_type(&self) -> Option<u8> {
+    pub fn tx_type(&self) -> Option<u8> {
         match self {
             Self::AccessList(_) => Some(AccessListTx::TYPE),
             Self::DynamicFee(_) => Some(DynamicFeeTx::TYPE),
             Self::Legacy(_) => None,
         }
     }
-    fn hash(&self) -> H256 {
+    pub fn hash(&self) -> H256 {
         match self {
             Self::Legacy(tx) => tx.hash(),
             Self::AccessList(tx) => tx.hash(),
             Self::DynamicFee(tx) => tx.hash(),
         }
     }
-    fn nonce(&self) -> u64 {
+    pub fn nonce(&self) -> u64 {
         match self {
             Self::Legacy(tx) => tx.nonce,
             Self::AccessList(tx) => tx.nonce,
             Self::DynamicFee(tx) => tx.nonce,
         }
     }
-    fn to(&self) -> TxAction {
+    pub fn to(&self) -> TxAction {
         match self {
             Self::Legacy(tx) => tx.to,
             Self::AccessList(tx) => tx.to,
             Self::DynamicFee(tx) => tx.to,
         }
     }
-    fn value(&self) -> U256 {
+    pub fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.value,
             Self::AccessList(tx) => tx.value,
             Self::DynamicFee(tx) => tx.value,
         }
     }
-    fn gas_price(&self) -> Option<U256> {
+    pub fn gas_price(&self) -> Option<U256> {
         match self {
             Self::Legacy(tx) => Some(tx.gas_price),
             Self::AccessList(tx) => Some(tx.gas_price),
             Self::DynamicFee(_) => None,
         }
     }
-    fn chain_id(&self) -> Option<U256> {
+    pub fn chain_id(&self) -> Option<U256> {
         match self {
             Self::Legacy(tx) => tx.v.derive_chain_id(),
             Self::AccessList(tx) => Some(tx.chain_id),
             Self::DynamicFee(tx) => Some(tx.chain_id),
         }
     }
-    fn tip(&self) -> Option<U256> {
+    pub fn tip(&self) -> Option<U256> {
         match self {
             Self::DynamicFee(tx) => Some(tx.tip),
             _ => None,
         }
     }
-    fn fee_cap(&self) -> Option<U256> {
+    pub fn fee_cap(&self) -> Option<U256> {
         match self {
             Self::DynamicFee(tx) => Some(tx.fee_cap),
             _ => None,
         }
     }
-    fn gas(&self) -> u64 {
+    pub fn gas(&self) -> u64 {
         match self {
             Self::Legacy(tx) => tx.gas,
             Self::AccessList(tx) => tx.gas,
             Self::DynamicFee(tx) => tx.gas,
         }
     }
-    fn data(&self) -> &Bytes {
+    pub fn data(&self) -> &Bytes {
         match self {
             Self::Legacy(tx) => &tx.data,
             Self::AccessList(tx) => &tx.data,
             Self::DynamicFee(tx) => &tx.data,
         }
     }
-    fn r(&self) -> U256 {
+    pub fn r(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.r,
             Self::AccessList(tx) => tx.r,
             Self::DynamicFee(tx) => tx.r,
         }
     }
-    fn s(&self) -> U256 {
+    pub fn s(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.s,
             Self::AccessList(tx) => tx.s,
@@ -301,7 +305,7 @@ impl Transaction {
         }
     }
     //TODO
-    fn v(&self) -> U256 {
+    pub fn v(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.v.derive_v(),
             Self::AccessList(tx) => tx.v,
@@ -309,7 +313,7 @@ impl Transaction {
         }
     }
 
-    fn access_list(&self) -> Option<Cow<'_, AccessList>> {
+    pub fn access_list(&self) -> Option<Cow<'_, AccessList>> {
         match self {
             Self::AccessList(tx) => Some(Cow::Borrowed(&tx.access_list)),
             Self::DynamicFee(tx) => Some(Cow::Borrowed(&tx.access_list)),
