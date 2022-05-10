@@ -26,7 +26,7 @@ fn main() -> Result<()> {
 
     let mut bindings = String::new();
     for name in contracts_to_bind {
-        let contract = output.find(name).ok_or(eyre!(
+        let contract = output.find(name).ok_or_else(|| eyre!(
             "Could Not bind contract {}. Compiler output not found.",
             name
         ))?;
@@ -34,7 +34,7 @@ fn main() -> Result<()> {
         // write bytecode to build dir if binding a non-abstract contract
         if let Some(bin) = &contract.bytecode {
             fs::write(
-                &build_dir.join(name.clone().to_snake_case().to_owned() + ".bin"),
+                &build_dir.join(name.to_snake_case().to_owned() + ".bin"),
                 hex::encode(bin.object.clone()),
             )?;
         }
@@ -94,13 +94,13 @@ fn compile(dir: PathBuf) -> Result<ProjectCompileOutput<ConfigurableArtifacts>> 
 fn check_solc(version: Version) {
     let req = VersionReq::parse(SOLC_VERSION_REQ).expect("Cannot parse SOLC_VERSION_REQ");
     if !req.matches(&version) {
-        println!("cargo:warning=solc version mismatch. Using local solc executable, version: {}. Expected: {}", version, req.to_string());
+        println!("cargo:warning=solc version mismatch. Using local solc executable, version: {}. Expected: {}", version, req);
     }
 }
 
 fn mkdir(dir: PathBuf) -> PathBuf {
     if !dir.exists() {
-        fs::create_dir(&dir).expect(&format!("could not create dir: {}", dir.to_string_lossy()));
+        fs::create_dir(&dir).unwrap_or_else(|_| panic!("could not create dir: {}", dir.to_string_lossy()));
     }
     dir
 }

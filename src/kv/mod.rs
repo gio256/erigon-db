@@ -132,9 +132,9 @@ impl<'env, M> MdbxTx<'env, M>
 where
     M: TransactionKind + Mode,
 {
-    pub fn open_db<'tx, Db: DbName, Flags: DbFlags>(
-        &'tx self,
-    ) -> Result<TableHandle<'tx, Db, Flags>> {
+    pub fn open_db<Db: DbName, Flags: DbFlags>(
+        &self,
+    ) -> Result<TableHandle<'_, Db, Flags>> {
         let mut flags = Flags::FLAGS;
         // If the transaction is read-write, create the database if it does not exist already.
         if M::is_writeable() {
@@ -251,6 +251,7 @@ where
         self.inner.first()?.map(decode_val::<T>).transpose()
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<(T::Key, T::Value)>>
     where
         T::Key: TableDecode,

@@ -110,6 +110,14 @@ macro_rules! make_tuple_key {
 }
 pub(crate) use make_tuple_key;
 
+/// tuple_key! generates a tuple struct for a table key or table value that wraps
+/// one or more types. It also generates implementations of `TableEncode` and
+/// `TableDecode`, allowing the new type to be encoded to and decoded from the
+/// raw bytes stored in the database.
+///
+/// For a single-element wrapper type, the encoding is just the encoding of the
+/// inner type. For an n-tuple with n > 1, the encoding is the concatenation of
+/// the encodings of each of the elements.
 macro_rules! tuple_key {
     ($name:ident($t0:ty)) => {
         $crate::erigon::macros::make_tuple_key!($name($t0), 0);
@@ -123,6 +131,7 @@ macro_rules! tuple_key {
 }
 pub(crate) use tuple_key;
 
+/// constant_key! declares a table key type whose encoding is always the same string.
 macro_rules! constant_key {
     ($name:ident, $encoded:ident) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,7 +150,8 @@ macro_rules! constant_key {
 }
 pub(crate) use constant_key;
 
-/// Implements TableEncode and TableDecode for any value that is stored rlp encoded
+/// rlp_table_value! implements TableEncode and TableDecode for any value that
+/// is stored in its rlp-encoded form.
 macro_rules! rlp_table_value {
     ($t:ty) => {
         impl $crate::kv::traits::TableEncode for $t {
@@ -173,6 +183,8 @@ macro_rules! impl_from {
 }
 pub(crate) use impl_from;
 
+/// bytes_wrapper! declares a newtype wrapper around a type whose encoding function is
+/// the identity (e.g. the byte-encoded form of a bytes::Bytes type is itself).
 macro_rules! bytes_wrapper {
     ($name:ident($t:ty)) => {
         #[derive(
@@ -192,7 +204,7 @@ macro_rules! bytes_wrapper {
         pub struct $name(pub $t);
 
         impl $crate::kv::traits::TableEncode for $name {
-            type Encoded = bytes::Bytes;
+            type Encoded = $t;
             fn encode(self) -> Self::Encoded {
                 self.0
             }
@@ -207,7 +219,7 @@ macro_rules! bytes_wrapper {
 }
 pub(crate) use bytes_wrapper;
 
-macro_rules! u64_wrapper {
+macro_rules! decl_u64_wrapper {
     ($ty:ident) => {
         #[derive(
             Debug,
@@ -238,7 +250,7 @@ macro_rules! u64_wrapper {
         $crate::erigon::macros::impl_from!($ty, usize);
     };
 }
-pub(crate) use u64_wrapper;
+pub(crate) use decl_u64_wrapper;
 
 macro_rules! u64_table_key {
     ($ty:ident) => {
@@ -262,6 +274,14 @@ macro_rules! u64_table_key {
 }
 pub(crate) use u64_table_key;
 
+macro_rules! u64_wrapper {
+    ($ty:ident) => {
+        $crate::erigon::macros::decl_u64_wrapper!($ty);
+        $crate::erigon::macros::u64_table_key!($ty);
+    };
+}
+pub(crate) use u64_wrapper;
+
 macro_rules! u256_wrapper {
     ($ty:ident) => {
         #[derive(
@@ -281,7 +301,7 @@ macro_rules! u256_wrapper {
             ::derive_more::FromStr,
             ::serde::Serialize,
             ::serde::Deserialize,
-            ::fastrlp::RlpEncodableWrapper,
+            ::fastrlp::RlpEncodable,
             ::fastrlp::RlpDecodableWrapper,
             ::fastrlp::RlpMaxEncodedLen,
         )]

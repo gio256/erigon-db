@@ -374,7 +374,7 @@ impl TableEncode for u32 {
 impl TableDecode for u32 {
     fn decode(b: &[u8]) -> Result<Self> {
         match b.len() {
-            4 => Ok(u32::from_be_bytes(*arrayref::array_ref!(&*b, 0, 4)).into()),
+            4 => Ok(u32::from_be_bytes(*arrayref::array_ref!(&*b, 0, 4))),
             other => Err(InvalidLength::<4> { got: other }.into()),
         }
     }
