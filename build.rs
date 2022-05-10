@@ -26,10 +26,12 @@ fn main() -> Result<()> {
 
     let mut bindings = String::new();
     for name in contracts_to_bind {
-        let contract = output.find(name).ok_or_else(|| eyre!(
-            "Could Not bind contract {}. Compiler output not found.",
-            name
-        ))?;
+        let contract = output.find(name).ok_or_else(|| {
+            eyre!(
+                "Could Not bind contract {}. Compiler output not found.",
+                name
+            )
+        })?;
 
         // write bytecode to build dir if binding a non-abstract contract
         if let Some(bin) = &contract.bytecode {
@@ -100,7 +102,8 @@ fn check_solc(version: Version) {
 
 fn mkdir(dir: PathBuf) -> PathBuf {
     if !dir.exists() {
-        fs::create_dir(&dir).unwrap_or_else(|_| panic!("could not create dir: {}", dir.to_string_lossy()));
+        fs::create_dir(&dir)
+            .unwrap_or_else(|_| panic!("could not create dir: {}", dir.to_string_lossy()));
     }
     dir
 }

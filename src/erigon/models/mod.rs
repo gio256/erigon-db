@@ -16,6 +16,8 @@ pub mod block;
 pub use block::*;
 pub mod account;
 pub use account::*;
+pub mod log;
+pub use log::*;
 
 use crate::erigon::utils::consts::*;
 
@@ -90,7 +92,7 @@ impl TableEncode for BurntKey {
 bytes_wrapper!(Rlp(Bytes));
 bytes_wrapper!(Bytecode(Bytes));
 
-u256_wrapper!(TotalDifficulty);
+decl_u256_wrapper!(TotalDifficulty);
 rlp_table_value!(TotalDifficulty);
 
 // The TxSender table stores addresses with no serialization format (new address every 20 bytes)

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use crate::erigon::{
-    macros::u256_wrapper,
+    macros::decl_u256_wrapper,
     utils::{consts as C, keccak256},
 };
 
@@ -90,7 +90,7 @@ pub struct AccessTuple {
 pub type AccessList = Vec<AccessTuple>;
 
 // For legacy transactions, v is packed with the Eip155 chain id
-u256_wrapper!(VPackChainId);
+decl_u256_wrapper!(VPackChainId);
 
 impl VPackChainId {
     // Eip155 defines v as either {0,1} + 27 (no chain id) OR {0,1} + chain_id * 2 + 35
@@ -110,7 +110,7 @@ impl VPackChainId {
     //TODO
     pub fn derive_v(&self) -> U256 {
         if let Some(chain_id) = self.derive_chain_id() {
-            self.0 - (chain_id * 2 + 35) + 27
+            self.0 - (chain_id * 2 + 35)
         } else {
             self.0
         }

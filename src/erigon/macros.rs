@@ -211,7 +211,7 @@ macro_rules! bytes_wrapper {
         }
 
         impl $crate::kv::traits::TableDecode for $name {
-            fn decode(b: &[u8]) -> Result<Self> {
+            fn decode(b: &[u8]) -> ::eyre::Result<Self> {
                 $crate::kv::traits::TableDecode::decode(b).map(Self)
             }
         }
@@ -263,7 +263,7 @@ macro_rules! u64_table_key {
         }
 
         impl $crate::kv::traits::TableDecode for $ty {
-            fn decode(b: &[u8]) -> Result<Self> {
+            fn decode(b: &[u8]) -> ::eyre::Result<Self> {
                 match b.len() {
                     8 => Ok(u64::from_be_bytes(*::arrayref::array_ref!(&*b, 0, 8)).into()),
                     other => Err($crate::kv::tables::InvalidLength::<8> { got: other }.into()),
@@ -282,7 +282,7 @@ macro_rules! u64_wrapper {
 }
 pub(crate) use u64_wrapper;
 
-macro_rules! u256_wrapper {
+macro_rules! decl_u256_wrapper {
     ($ty:ident) => {
         #[derive(
             Debug,
@@ -312,4 +312,39 @@ macro_rules! u256_wrapper {
         $crate::erigon::macros::impl_from!($ty, U256);
     };
 }
-pub(crate) use u256_wrapper;
+pub(crate) use decl_u256_wrapper;
+
+macro_rules! cbor_wrapper {
+    ($name:ident($t:ty)) => {
+        #[derive(
+            Debug,
+            Clone,
+            PartialEq,
+            Eq,
+            Default,
+            ::derive_more::Deref,
+            ::derive_more::DerefMut,
+            ::derive_more::From,
+            ::serde::Serialize,
+            ::serde::Deserialize,
+        )]
+        #[serde(transparent)]
+        #[repr(transparent)]
+        pub struct $name(pub $t);
+
+        impl $crate::kv::traits::TableEncode for $name {
+            type Encoded = Vec<u8>;
+            fn encode(self) -> Self::Encoded {
+                ::serde_cbor::to_vec(&self.0)
+                    .expect(concat!("failed to encode ", stringify!($name)))
+            }
+        }
+
+        impl $crate::kv::traits::TableDecode for $name {
+            fn decode(b: &[u8]) -> ::eyre::Result<Self> {
+                ::serde_cbor::from_slice(b).map_err(From::from).map(Self)
+            }
+        }
+    };
+}
+pub(crate) use cbor_wrapper;

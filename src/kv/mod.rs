@@ -132,9 +132,7 @@ impl<'env, M> MdbxTx<'env, M>
 where
     M: TransactionKind + Mode,
 {
-    pub fn open_db<Db: DbName, Flags: DbFlags>(
-        &self,
-    ) -> Result<TableHandle<'_, Db, Flags>> {
+    pub fn open_db<Db: DbName, Flags: DbFlags>(&self) -> Result<TableHandle<'_, Db, Flags>> {
         let mut flags = Flags::FLAGS;
         // If the transaction is read-write, create the database if it does not exist already.
         if M::is_writeable() {

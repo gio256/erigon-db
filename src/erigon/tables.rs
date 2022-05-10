@@ -68,16 +68,17 @@ table!(Issuance                 => BlockNumber      => U256);
 table!(Burnt                    => BurntKey         => U256, rename = Issuance);
 // key: code_hash. value: contract_TEVM_code. erigon: ContractTEVMCode. Unused.
 table!(TEVMCode                 => H256             => Bytes);
+// receipts are only stored for canonical blocks
+// key: blocknum. val: cbor(receipt). erigon: Receipts
+table!(Receipt                  => BlockNumber      => CborReceipts);
+// key: blocknum||log_index_in_tx. val: cbor(log). erigon: Log
+table!(TransactionLog           => LogsKey          => CborLogs);
 
 type Todo = Bytes;
 // erigon: TrieOfAccounts
 table!(TrieAccount => Todo => Todo);
 // erigon: TrieOfStorage
 table!(TrieStorage => Todo => Todo);
-// key: blocknum. val: cbor(receipt). erigon: Receipts
-table!(Receipt => BlockNumber => Todo);
-// key: blocknum||log_index_in_tx. val: cbor(log). erigon: Log
-table!(TransactionLog => (BlockNumber, u32) => Todo);
 table!(LogTopicIndex => Todo => Todo);
 table!(LogAddressIndex => Todo => Todo);
 // key: blocknum||address.
