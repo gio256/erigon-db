@@ -26,7 +26,7 @@ fn main() -> Result<()> {
 
     let mut bindings = String::new();
     for name in contracts_to_bind {
-        let contract = output.find(name).ok_or_else(|| {
+        let contract = output.find_first(name).ok_or_else(|| {
             eyre!(
                 "Could Not bind contract {}. Compiler output not found.",
                 name
