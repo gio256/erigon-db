@@ -303,7 +303,6 @@ macro_rules! decl_u256_wrapper {
             ::serde::Deserialize,
             ::fastrlp::RlpEncodable,
             ::fastrlp::RlpDecodableWrapper,
-            ::fastrlp::RlpMaxEncodedLen,
         )]
         #[serde(transparent)]
         #[repr(transparent)]
